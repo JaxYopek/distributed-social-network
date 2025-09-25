@@ -15,4 +15,5 @@ MIT [License](LICENSE)
 ## Copyright
 
 - Jax Yopek
+- Jordan Brent
 - 
