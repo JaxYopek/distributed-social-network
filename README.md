@@ -10,7 +10,7 @@ Make a distributed social network!
 
 ## License
 
-MIT [License] (LICENSE)
+MIT [License](LICENSE)
 
 ## Copyright
 
