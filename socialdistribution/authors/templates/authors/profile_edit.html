@@ -1,0 +1,57 @@
+
+{% extends "base.html" %}
+
+{% block title %}Edit Profile - Social Distribution{% endblock %}
+
+{% block content %}
+<div class="card">
+    <h2>Edit Profile</h2>
+    
+    <form method="post" enctype="multipart/form-data">
+        {% csrf_token %}
+        
+        {% for field in form %}
+            <div class="form-group">
+                <label for="{{ field.id_for_label }}">{{ field.label }}</label>
+                {{ field }}
+                {% if field.help_text %}
+                    <small>{{ field.help_text }}</small>
+                {% endif %}
+                {% if field.errors %}
+                    <div style="color: #c62828; font-size: 12px; margin-top: 5px;">
+                        {{ field.errors }}
+                    </div>
+                {% endif %}
+            </div>
+        {% endfor %}
+        
+        <button type="submit">Save Changes</button>
+        
+        <div class="link">
+            <a href="{% url 'authors:login'%}">Cancel and return to profile</a> <!-- CHANGE LATER-->
+        </div>
+    </form>
+</div>
+
+<style>
+    small {
+        display: block;
+        margin-top: 5px;
+        color: #666;
+        font-size: 12px;
+    }
+    
+    input[type="url"] {
+        width: 100%;
+        padding: 12px;
+        border: 1px solid #ddd;
+        border-radius: 4px;
+        font-size: 14px;
+    }
+    
+    input[type="url"]:focus {
+        outline: none;
+        border-color: #1E90FF;
+    }
+</style>
+{% endblock %}

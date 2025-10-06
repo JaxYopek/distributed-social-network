@@ -1,0 +1,48 @@
+{% extends 'base.html' %}
+
+{% block title %}Sign Up - Social Distribution{% endblock %}
+
+{% block content %}
+<div class="card">
+    <h2>Create an Account</h2>
+    
+    <form method="post">
+        {% csrf_token %}
+        
+        <div class="form-group">
+            <label for="username">Username:</label>
+            <input type="text" id="username" name="username" required autofocus>
+        </div>
+        
+        <div class="form-group">
+            <label for="email">Email (optional):</label>
+            <input type="email" id="email" name="email">
+        </div>
+        
+        <div class="form-group">
+            <label for="display_name">Display Name:</label>
+            <input type="text" id="display_name" name="display_name" placeholder="Leave blank to use username">
+        </div>
+        
+        <div class="form-group">
+            <label for="password">Password:</label>
+            <input type="password" id="password" name="password" required>
+        </div>
+        
+        <div class="form-group">
+            <label for="password_confirm">Confirm Password:</label>
+            <input type="password" id="password_confirm" name="password_confirm" required>
+        </div>
+        
+        <button type="submit">Sign Up</button>
+    </form>
+    
+    <div class="link">
+        Already have an account? <a href="{% url 'authors:login' %}">Login</a>
+    </div>
+    
+    <div class="link" style="margin-top: 10px; font-size: 14px; color: #999;">
+        Note: Your account will require admin approval before you can login.
+    </div>
+</div>
+{% endblock %}
