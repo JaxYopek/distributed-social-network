@@ -142,3 +142,9 @@ def view_entry(request, entry_id):
     context = {'entry': entry}
     return render(request, 'entries/view_entry.html', context)
 
+@login_required
+def my_entries(request):
+    """List all of the users entires"""
+    entries = Entry.objects.filter(author=request.user).exclude(visibility='DELETED').order_by('-id')
+    context = {'entries': entries}
+    return render(request, 'entries/my_entries.html', context)
