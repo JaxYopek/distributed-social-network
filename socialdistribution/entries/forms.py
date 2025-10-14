@@ -3,7 +3,11 @@ from .models import Entry, Visibility
 
 class EntryForm(forms.ModelForm):
     """Form for creating and editing entries"""
-    
+    VISIBILITY_CHOICES = [
+        ('PUBLIC', 'Public'),
+        ('FRIENDS', 'Friends Only'),
+        ('UNLISTED', 'Unlisted'),
+    ]
     title = forms.CharField(
         max_length=200,
         required=True,
@@ -38,7 +42,7 @@ class EntryForm(forms.ModelForm):
     )
     
     visibility = forms.ChoiceField(
-        choices=Entry.VISIBILITY_CHOICES,
+        choices=VISIBILITY_CHOICES,
         initial='PUBLIC',
         label='Visibility'
     )
@@ -47,6 +51,5 @@ class EntryForm(forms.ModelForm):
         model = Entry
         fields = ["title", "description", "content", "content_type", "visibility"]
         widgets = {
-            # Optional: ensure a select widget (uses your choices above)
             "visibility": forms.Select(choices=Entry.VISIBILITY_CHOICES),
         }
