@@ -95,7 +95,7 @@ def stream(request):
     entries = (
         Entry.objects
         .filter(
-            Q(visibility=Visibility.PUBLIC) | Q(author=author)
+            Q(visibility=Visibility.PUBLIC) | Q(author=author) # TODO: add friends entries to stream once following is implemented
         )
         .select_related("author")
         .order_by("-published")

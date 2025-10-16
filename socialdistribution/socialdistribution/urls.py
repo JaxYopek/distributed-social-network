@@ -23,4 +23,6 @@ urlpatterns = [
     path('', author_views.stream, name='stream'),
     path('authors/', include('authors.urls')),
     path('entries/', include('entries.urls')),
+    path('api/', include('entries.api_urls')),
+    path('api/', include('authors.api_urls')),
 ]
