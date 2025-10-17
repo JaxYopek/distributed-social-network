@@ -159,7 +159,6 @@ def view_entry(request, entry_id):
             if not request.user.is_authenticated or request.user.id != entry.author.id:
                 raise PermissionDenied
         # PUBLIC and UNLISTED visible to anyone
-
     context = {"entry": entry}
     return render(request, "entries/view_entry.html", context)
 

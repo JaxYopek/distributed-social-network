@@ -19,8 +19,8 @@ class EntrySerializer(serializers.ModelSerializer):
         """
         model = Entry
         fields = [
-            "type", "id", "title", "description", "content_type", "content",
-            "visibility", "published", "author", "web"
+            "type", "id", "web", "title", "description", "content_type", "content",
+            "visibility", "published", "author"
         ]
 
     def get_id(self, obj):

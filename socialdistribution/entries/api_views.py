@@ -6,45 +6,21 @@ from django.http import Http404
 from django.db.models import Q
 from .models import Entry, Visibility
 from .serializers import EntrySerializer
+from rest_framework.pagination import PageNumberPagination
 
+class PublicEntriesPagination(PageNumberPagination):
+    page_size = 10
+    page_size_query_param = 'page_size'
+    max_page_size = 100
 
 class PublicEntriesListView(generics.ListAPIView):
-    """
-    GET /api/entries/
-
-    Returns a paginated list of public entries with nested author info.
-
-    - Permissions: AllowAny
-    - Response fields:
-        - type: "entries"
-        - src: list of entries
-            - id: URL of the entry
-            - title, description, content_type, content, visibility, published
-            - author: nested author object (id, displayName, host, github, profileImage)
-            - web: front-end URL of the entry
-    """
     serializer_class = EntrySerializer
     permission_classes = [permissions.AllowAny]
 
     def get_queryset(self):
-        """
-        Returns the list of public entry objects, sorted by recently published
-        """
-        return Entry.objects.filter(visibility=Visibility.PUBLIC).select_related("author").order_by("-published")
-
-    def list(self, request, *args, **kwargs):
-        """
-        Serializes queryset when GET response is received
-        Returns 200 OK response with serialized queryset as body 
-        """
-        queryset = self.get_queryset()
-        page = self.paginate_queryset(queryset)
-        serializer = self.get_serializer(page, many=True, context={"request": request})
-        return self.get_paginated_response({
-            "type": "entries",
-            "src": serializer.data
-        })
-
+        return Entry.objects.filter(visibility=Visibility.PUBLIC)\
+                            .select_related("author")\
+                            .order_by("-published")
 
 class EntryDetailView(APIView):
     """

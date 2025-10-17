@@ -25,12 +25,12 @@ def signup(request):
             messages.error(request, 'Passwords do not match.')
             return render(request, 'authors/signup.html')
         
-        # Check if username exists
+        # Check if username exists (prevents duplicate usernames login)
         if Author.objects.filter(username=username).exists():
             messages.error(request, 'Username already exists.')
             return render(request, 'authors/signup.html')
         
-        # Create the author (not approved by default)
+        # Create the author account (requires admin approval before )
         author = Author.objects.create_user(
             username=username,
             email=email,
@@ -48,13 +48,12 @@ def signup(request):
 def profile_edit(request, author_id):
     """
     View for editing an author's profile.
-    Only the author themselves can edit their profile.
+    Only the currently logged-in author can access this page.
     ***still need to add description***
     """
     author = get_object_or_404(Author, id=author_id)
     
-    # Ensure the logged-in user can only edit their own profile
-    # Since Author extends AbstractUser, request.user IS the author
+    # Block users from editing others profile
     if request.user.id != author.id:
         messages.error(request, "You can only edit your own profile.")
         return redirect('stream')
@@ -89,7 +88,8 @@ def profile_edit(request, author_id):
 @login_required
 def stream(request):
     """
-    Display the main feed/stream for the logged-in author.    
+    Show the main feed for the logged-in author.
+    Displays publuc posts and user's own posts.    
     """
     author = request.user  
     entries = (

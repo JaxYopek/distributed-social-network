@@ -13,13 +13,14 @@ class AuthorSerializer(serializers.ModelSerializer):
     displayName = serializers.CharField(source="display_name")
     github = serializers.CharField(allow_blank=True)
     profileImage = serializers.CharField(source="profile_image", allow_blank=True)
+    web = serializers.SerializerMethodField()
 
     class Meta:
         """
         Determines which model and fields to serialize
         """
         model = Author
-        fields = ["type", "id", "host", "displayName", "github", "profileImage"]
+        fields = ["type", "id", "host", "displayName", "github", "profileImage", "web"]
 
     def get_id(self, obj):
         """
@@ -28,9 +29,15 @@ class AuthorSerializer(serializers.ModelSerializer):
         request = self.context.get("request")
         return request.build_absolute_uri(reverse("authors_api:author-detail", args=[obj.id]))
 
-    def get_host(self):
+    def get_host(self,obj):
         """
         Used to determine which node the author lives on
         """
         request = self.context.get("request")
         return request.build_absolute_uri("/api/")
+    def get_web(self, obj):
+        """
+        Generates the URL for the HTML page of the author
+        """
+        request = self.context.get("request")
+        return request.build_absolute_uri(reverse("authors:profile_detail", args=[obj.id]))
