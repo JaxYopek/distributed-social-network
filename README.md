@@ -123,7 +123,7 @@ Response:
 }
 
 ]
-
+... Four More Entries ...
 }
 
 ```
@@ -137,7 +137,64 @@ Response:
 GET http://service/api/entries/
 
 ```
+Response:
 
+```json
+
+{
+
+"count": 11,
+
+"next": "http://service/api/entries/?page=2&page_size=5",
+
+"previous": null,
+
+"results": [
+
+{
+
+"type": "entry",
+
+"id": "http://service/api/entries/130e95ca-fd2e-49ae-8844-9202021c38f5/",
+
+"web": "http://service/entries/130e95ca-fd2e-49ae-8844-9202021c38f5/",
+
+"title": "Some spooky entry",
+
+"description": "A brief yet scary description",
+
+"content_type": "text/plain",
+
+"content": "BOO!",
+
+"visibility": "PUBLIC",
+
+"published": "2025-10-17T17:19:52.114927Z",
+
+"author": {
+
+"type": "author",
+
+"id": "http://service/api/authors/a1b2c3d4-e5f6-7890-abcd-ef1234567890/",
+
+"host": "http://service/api/",
+
+"displayName": "Sample Author (who sometimes writes horror short stories)",
+
+"github": "https://github.com/sampleauthor",
+
+"profileImage": "",
+
+"web": "http://service/authors/profile/a1b2c3d4-e5f6-7890-abcd-ef1234567890/"
+
+}
+
+}
+... Nine More Entries (Defaults to 10 entries per page) ...
+]
+}
+
+```
   
 
 ### Response Fields
@@ -365,7 +422,7 @@ GET http://service/api/authors/?page=1&page_size=1
 Response:
 
 ```json
-
+\\ Shows one author (even though count = 3)
 {
 
 "count": 3,
@@ -410,7 +467,41 @@ GET http://service/api/authors/
 
 ```
 
-  
+Response:
+
+```json
+{
+
+"count": 3,
+
+"next": "http://service/api/authors/?page=2&page_size=1",
+
+"previous": null,
+
+"results": [
+
+{
+
+"type": "author",
+
+"id": "http://service/api/authors/a1b2c3d4-e5f6-7890-abcd-ef12345678666/",
+
+"host": "http://service/api/",
+
+"displayName": "Steve Jobs",
+
+"github": "https://github.com/iPhone18Leaks",
+
+"profileImage": "Steve Jobs Profile URL",
+
+"web": "http://service/authors/profile/a1b2c3d4-e5f6-7890-abcd-ef1234567666/"
+
+}
+... Two more authors (Note: count = 3)
+]
+}
+
+```
 
 ### Response Fields
 
@@ -492,11 +583,11 @@ Response:
 
 "host": "http://service/api/",
 
-"displayName": "Sample Author",
+"displayName": "Sample Arthur",
 
-"github": "https://github.com/sampleauthor",
+"github": "https://github.com/samplearthur",
 
-"profileImage": "",
+"profileImage": "www.arthur.net",
 
 "web": "http://service/authors/profile/a1b2c3d4-e5f6-7890-abcd-ef1234567890/"
 
@@ -634,7 +725,7 @@ Response:
 }
 
 }
-
+... Four more entries (Note page_size=5)
 ]
 
 }
@@ -648,6 +739,66 @@ Response:
 ```http
 
 GET http://service/api/authors/a1b2c3d4-e5f6-7890-abcd-ef1234567890/entries/
+
+```
+Response:
+
+
+```json
+
+{
+
+"count": 7,
+
+"next": "http://service/api/authors/a1b2c3d4-e5f6-7890-abcd-ef1234567890/entries/?page=2&page_size=5",
+
+"previous": null,
+
+"results": [
+
+{
+
+"type": "entry",
+
+"id": "http://service/api/entries/entry-uuid-here/",
+
+"web": "http://service/entries/entry-uuid-here/",
+
+"title": "My Sad Entry Title",
+
+"description": "I need to vent",
+
+"content_type": "text/plain",
+
+"content": "This project is rewarding but it can feel overwhelming sometimes.",
+
+"visibility": "FRIENDS",
+
+"published": "2025-10-17T13:00:00.000000Z",
+
+"author": {
+
+"type": "author",
+
+"id": "http://service/api/authors/a1b2c3d4-e5f6-7890-abcd-ef1234567890/",
+
+"host": "http://service/api/",
+
+"displayName": "One of the devs",
+
+"github": "https://github.com/notJaxYopek",
+
+"profileImage": "",
+
+"web": "http://service/authors/profile/a1b2c3d4-e5f6-7890-abcd-ef1234567890/"
+
+}
+
+}
+... Six more entries (Note: count=7) ...
+]
+
+}
 
 ```
 
@@ -798,13 +949,13 @@ curl -X POST "http://service/api/authors/a1b2c3d4-e5f6-7890-abcd-ef1234567890/en
 
 -d '{
 
-"title": "API Test Entry",
+"title": "TV Show Rant",
 
-"description": "Testing entry creation",
+"description": "What show I'm never going to finish even though everyone else has seen it",
 
 "content_type": "text/plain",
 
-"content": "This is a test entry",
+"content": "Game of Thrones",
 
 "visibility": "PUBLIC"
 
