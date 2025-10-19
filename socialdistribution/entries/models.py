@@ -9,6 +9,7 @@ User = get_user_model()
 class Visibility(models.TextChoices):
     PUBLIC = "PUBLIC", "Public"
     FRIENDS = "FRIENDS", "Friends only"
+    DELETED = "DELTED", "Deleted"
 
 class Entry(models.Model):
     """Model for blog entries/posts"""

@@ -28,9 +28,9 @@ class EntryDetailView(APIView):
         Retrieves the entry object from the database and returns it unless incorrect visibility
         """
         entry = get_object_or_404(Entry, id=entry_id)
-
+        
         # Deleted entries hidden from those who arent admin
-        if entry.visibility == Visibility.DELETED:
+        if entry.visibility == "DELETED":
             raise Http404("Entry not found")
 
         # FRIENDS visibility (only author can see for now) #TODO: implement friends/following
@@ -63,7 +63,7 @@ class MyEntriesListView(generics.ListCreateAPIView):
         """
         Returns list of current users entries excluding deleted entries
         """
-        return Entry.objects.filter(author=self.request.user).exclude(visibility=Visibility.DELETED).order_by("-published")
+        return Entry.objects.filter(author=self.request.user).exclude(visibility="DELETED").order_by("-published")
 
     def perform_create(self, serializer):
         """
