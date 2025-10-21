@@ -10,6 +10,7 @@ class Visibility(models.TextChoices):
     PUBLIC = "PUBLIC", "Public"
     FRIENDS = "FRIENDS", "Friends only"
     DELETED = "DELTED", "Deleted"
+    UNLISTED = "UNLISTED", "Unlisted"
 
 class Entry(models.Model):
     """Model for blog entries/posts"""
@@ -57,44 +58,42 @@ class Entry(models.Model):
         Anyone can view public, no one can view deleted, friends only means both follow eachother
         TODO: Utilize more in next iteration
         """
-        # Public entries are always visible
         if self.visibility == Visibility.PUBLIC:
             return True
 
-        # Deleted entries are never visible
         if self.visibility == Visibility.DELETED:
             return False
 
-        # Must be authenticated for FRIENDS entries
         if not user or not user.is_authenticated:
             return False
 
-        # Author can always view
         if user == self.author:
             return True
-        viewer_author = user 
 
-        # Only check mutual following for FRIENDS visibility
+        # Mutual following for FRIENDS
         if self.visibility == Visibility.FRIENDS:
-            # Viewer follows author
             viewer_follows_author = FollowRequest.objects.filter(
-                follower=viewer_author,
+                follower=user,
                 followee=self.author,
                 status=FollowRequestStatus.APPROVED
             ).exists()
-
-            # Author follows viewer
             author_follows_viewer = FollowRequest.objects.filter(
                 follower=self.author,
-                followee=viewer_author,
+                followee=user,
                 status=FollowRequestStatus.APPROVED
             ).exists()
-
             return viewer_follows_author and author_follows_viewer
 
-        # Fallback: deny access
+        # Followers-only for UNLISTED
+        if self.visibility == Visibility.UNLISTED:
+            viewer_follows_author = FollowRequest.objects.filter(
+                follower=user,
+                followee=self.author,
+                status=FollowRequestStatus.APPROVED
+            ).exists()
+            return viewer_follows_author
+
         return False
-    
 
     # Timestamps
     published = models.DateTimeField(auto_now_add=True)

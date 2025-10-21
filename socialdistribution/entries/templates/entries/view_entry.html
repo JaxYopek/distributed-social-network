@@ -55,12 +55,22 @@
         text-decoration: none;
         font-size: 14px;
         cursor: pointer;
+        display: inline-block; 
     }
 
     .btn-edit, .btn-edit:visited {
         background-color: #1E90FF;
         color: white;
+        width: auto;
     }
+    .btn-share, .btn-share:visited{
+        background-color: #6c757d;
+        color: white;
+        width: auto;
+    }
+    .btn-share:hover {
+    background-color: #5a6268;
+    }   
     .btn-edit:hover {
         background-color: #187bcd;
     }
@@ -129,6 +139,22 @@
             </form>
         {% endif %}
         <a href="{% url 'stream' %}" class="btn-back">Back to Stream</a>
+        {% if entry.visibility == 'PUBLIC' or entry.visibility == 'UNLISTED' %}
+        <button type="button" class="btn-share" onclick="copyEntryURL('{{ request.build_absolute_uri }}')">
+            Share
+        </button>
+        {% endif %}
     </div>
+    <script>
+        function copyEntryURL(url) {
+            navigator.clipboard.writeText(url)
+                .then(() => {
+                    alert("Entry URL copied to clipboard!");
+                })
+                .catch(err => {
+                    console.error("Failed to copy: ", err);
+                });
+        }
+        </script>
 </div>
 {% endblock %}

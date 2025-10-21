@@ -94,29 +94,30 @@ def stream(request):
     """
     author = request.user 
 
-    # Get all authors that the user follows (approved only)
+    # Get candidate entries: all public, friends, unlisted, or own
     following_authors = author.follow_requests_sent.filter(
         status=FollowRequestStatus.APPROVED
-    ).values_list("followee", flat=True) 
+    ).values_list("followee", flat=True)
 
-    # Get all of the entries which are either public, posted by someone which the user follows, or posted by the user
-    entries = (
-        Entry.objects
-        .filter(
-            Q(visibility=Visibility.PUBLIC) | Q(author=author) | Q(author__in=following_authors, visibility=Visibility.FRIENDS)
-        )
-        .select_related("author")
-        .order_by("-published")
-    )
+    candidate_entries = Entry.objects.filter(
+        Q(visibility=Visibility.PUBLIC) |
+        Q(author=author) |
+        Q(author__in=following_authors) |
+        Q(visibility=Visibility.UNLISTED)
+    ).select_related("author").order_by("-published")
+
+    # Filter using can_view
+    entries = [entry for entry in candidate_entries if entry.can_view(author)]
+
     context = {
-        'author': author,
-        'entries': entries,
-        'pending_follow_requests_count': author.follow_requests_received.filter(
+        "author": author,
+        "entries": entries,
+        "pending_follow_requests_count": author.follow_requests_received.filter(
             status=FollowRequestStatus.PENDING
         ).count(),
     }
-    
-    return render(request, 'authors/stream.html', context)
+
+    return render(request, "authors/stream.html", context)
 
 # Contains the info for a users profile page
 def profile_detail(request, author_id):
