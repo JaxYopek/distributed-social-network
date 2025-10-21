@@ -1,0 +1,40 @@
+{% extends "base.html" %}
+{% block title %}Following{% endblock %}
+{% block content %}
+<div class="card profile-card">
+    <div class="profile-header">
+        <div class="profile-meta">
+            <h1 class="profile-username">@{{ profile_author.username }}</h1>
+        </div>
+    </div>
+
+    <div class="profile-section">
+        <h2>Following</h2>
+        {% if users%}
+        <ul class="entry-list">
+            {% for user in users %}
+            <li class="entry-item" style="display: flex; align-items: center; gap: 10px;">
+                {% if user.profile_image %}
+                <img src="{{ user.profile_image }}" alt="{{ user.display_name }}" style="width: 40px; height: 40px; border-radius: 50%;">
+                {% else %}
+                <div class="profile-avatar placeholder" style="width: 40px; height: 40px; border-radius: 50%; background: #ddd; display: flex; align-items: center; justify-content: center;">
+                    {{ user.display_name|first|upper }}
+                </div>
+                {% endif %}
+                <a href="{{ user.get_absolute_url }}" style="text-decoration: none; color: inherit;">
+                    <h3 style="margin: 0;">{{ user.display_name }}</h3>
+                    <p class="entry-description" style="margin: 0;">@{{ user.username }}</p>
+                </a>
+            </li>
+            {% endfor %}
+        </ul>
+        {% else %}
+        <p>No following found.</p>
+        {% endif %}
+    </div>
+
+    <div style="margin-top: 16px;">
+        <a href="{% url 'stream' %}" style="color: #1E90FF;">← Return to Stream</a>
+    </div>
+</div>
+{% endblock %}

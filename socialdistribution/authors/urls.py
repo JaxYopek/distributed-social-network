@@ -24,6 +24,11 @@ urlpatterns = [
     path('follow-requests/<uuid:request_id>/approve/', views.approve_follow_request, name='approve_follow_request'),
     path('follow-requests/<uuid:request_id>/deny/', views.deny_follow_request, name='deny_follow_request'),
 
+    # Following/Followers/Freinds lists
+    path("<uuid:author_id>/followers/", views.followers_list, name="followers_list"),
+    path("<uuid:author_id>/following/", views.following_list, name="following_list"),
+    path("<uuid:author_id>/friends/", views.friends_list, name="friends_list"),
+
     # Main app pages (requires login)
     path('stream/', views.stream, name='stream'),
 ]

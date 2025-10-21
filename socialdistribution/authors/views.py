@@ -140,7 +140,7 @@ def profile_detail(request, author_id):
             .select_related("follower", "followee")
             .first()
         )
-
+    friends_count = profile_author.get_friends_count()
     context = {
         "profile_author": profile_author,
         "entries": entries,
@@ -152,6 +152,7 @@ def profile_detail(request, author_id):
         "following_count": profile_author.follow_requests_sent.filter(
             status=FollowRequestStatus.APPROVED
         ).count(),
+        "friends_count": friends_count,
     }
     return render(request, "authors/profile_detail.html", context)
 
@@ -265,3 +266,52 @@ def deny_follow_request(request, request_id):
         request, f"You denied {follow_request.follower.display_name}'s follow request."
     )
     return redirect("authors:follow_requests")
+
+@login_required
+def followers_list(request, author_id):
+    """
+    Creates a list of the users followers
+    """
+    profile_author = get_object_or_404(Author, id=author_id)
+    users = Author.objects.filter(
+        follow_requests_sent__followee=profile_author,
+        follow_requests_sent__status=FollowRequestStatus.APPROVED
+    ).distinct()
+    return render(request, "authors/followers_list.html", {
+        "users": users,
+        "profile_author": profile_author,
+        "title": f"{profile_author.display_name}'s Followers",
+    })
+@login_required
+def following_list(request, author_id):
+    """
+    Creates a list of people the user follows
+    """
+    profile_author = get_object_or_404(Author, id=author_id)
+    users = Author.objects.filter(
+        follow_requests_received__follower=profile_author,
+        follow_requests_received__status=FollowRequestStatus.APPROVED
+    ).distinct()
+    return render(request, "authors/following_list.html", {
+        "users": users,
+        "profile_author": profile_author,
+        "title": f"{profile_author.display_name} Follows",
+    })
+
+
+@login_required
+def friends_list(request, author_id):
+    """
+    Creates a list of ussers friends (mutual following)
+    """
+    profile_author = get_object_or_404(Author, id=author_id)
+    users = Author.objects.filter(
+        follow_requests_sent__status=FollowRequestStatus.APPROVED,
+        follow_requests_sent__followee__follow_requests_sent__follower=profile_author,
+        follow_requests_sent__followee__follow_requests_sent__status=FollowRequestStatus.APPROVED,
+    ).distinct()
+    return render(request, "authors/friends_list.html", {
+        "users": users,
+        "profile_author": profile_author,
+        "title": f"{profile_author.display_name}'s Friends",
+    })
