@@ -29,8 +29,17 @@
             </p>
             {% endif %}
             <div class="profile-counts">
-                <span><strong>{{ followers_count }}</strong> Followers</span>
-                <span><strong>{{ following_count }}</strong> Following</span>
+                <a href="{% url 'authors:followers_list' profile_author.id %}">
+                    <strong>{{ followers_count }}</strong> Followers
+                </a>
+                <a href="{% url 'authors:following_list' profile_author.id %}">
+                    <strong>{{ following_count }}</strong> Following
+                </a>
+                {% if profile_author == request.user %}
+                    <a href="{% url 'authors:friends_list' profile_author.id %}">
+                        <strong>{{ friends_count }}</strong> Friends
+                    </a>
+                {% endif %}
             </div>
             {% if request.user.is_authenticated and request.user != profile_author %}
             <div class="follow-actions">
@@ -144,11 +153,19 @@
         color: #888;
     }
     .profile-counts {
-        display: flex;
-        gap: 16px;
-        margin-top: 8px;
-        font-size: 14px;
+    display: flex;
+    gap: 16px;
+    margin-top: 8px;
+    font-size: 14px;
+    }
+
+    .profile-counts a,
+    .profile-counts a:visited,
+    .profile-counts a:hover,
+    .profile-counts a:active,
+    .profile-counts a:focus {
         color: #444;
+        text-decoration: none;
     }
     .follow-actions {
         margin-top: 16px;
@@ -207,6 +224,10 @@
     }
     .return-button:hover {
         background-color: #187bcd;
+    }
+    .a, .a:visited {
+        color: #1E90FF;
+        text-decoration: none;
     }
 </style>
 {% endblock %}

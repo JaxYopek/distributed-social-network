@@ -22,6 +22,21 @@ class Author(AbstractUser):
     # URL to author's profile - remains unique across the app
     def get_absolute_url(self):
         return reverse("authors:profile_detail", args=[self.id])
+    def get_friends_count(self):
+        """Return the number of mutual approved follow relationships (friends)."""
+        from .models import FollowRequest, FollowRequestStatus
+
+        # Get all users this author follows (approved)
+        following_ids = FollowRequest.objects.filter(
+            follower=self, status=FollowRequestStatus.APPROVED
+        ).values_list("followee_id", flat=True)
+
+        # Count how many of those users also follow this author back (approved)
+        return FollowRequest.objects.filter(
+            follower_id__in=following_ids,
+            followee=self,
+            status=FollowRequestStatus.APPROVED,
+        ).distinct().count()
 
 
 class FollowRequestStatus(models.TextChoices):
