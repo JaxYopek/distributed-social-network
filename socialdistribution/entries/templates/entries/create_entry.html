@@ -33,11 +33,27 @@
     .hidden {
         display: none;
     }
+    .markdown-help {
+    margin-top: 8px;
+    padding: 10px;
+    background-color: #f8f9fa;
+    border-left: 3px solid #1E90FF;
+    font-size: 13px;
+    border-radius: 4px;
+}
+.markdown-help strong {
+    color: #1E90FF;
+}
+.markdown-help code {
+    background-color: #e9ecef;
+    padding: 2px 6px;
+    border-radius: 3px;
+    font-family: monospace;
+}
 </style>
-
 <div class="card">
     <h2>Create New Entry</h2>
-    <form method="post" enctype="multipart/form-data">  
+    <form method="post" enctype="multipart/form-data">
         {% csrf_token %}
         
         <div class="form-group">
@@ -54,7 +70,9 @@
             <label for="id_content_type">Content Type</label>
             <select id="id_content_type" name="content_type">
                 <option value="text/plain">Plain Text</option>
-                <option value="image/png;base64">Image</option>
+                <option value="text/markdown">Markdown</option>
+                <option value="image/png;base64">PNG Image</option>
+                <option value="image/jpeg;base64">JPEG Image</option>
             </select>
         </div>
         
@@ -62,7 +80,6 @@
             <label for="id_content">Content</label>
             <textarea name="content" id="id_content" placeholder="Write your entry content here..." rows="10"></textarea>
         </div>
-        
         <div id="image-upload-group" class="form-group hidden">
             <label for="image-upload">Upload Image</label>
             <input type="file" name="image" id="image-upload" accept="image/png,image/jpeg,image/jpg">
@@ -75,32 +92,45 @@
                 <option value="FRIENDS">Friends Only</option>
                 <option value="UNLISTED">Unlisted</option>
             </select>
-        </div>        
+        </div>
         
         <button type="submit">Create Entry</button>
-        
         <div class="link">
             <a href="{% url 'stream' %}">Cancel</a>
         </div>
     </form>
 </div>
+
 <script>
     // Show/hide content fields based on content type
     const contentTypeSelect = document.getElementById('id_content_type');
     const textContentGroup = document.getElementById('text-content-group');
     const imageUploadGroup = document.getElementById('image-upload-group');
-    
+    const markdownHelp = document.getElementById('markdown-help');
+    const contentTextarea = document.getElementById('id_content');
+
     function toggleContentFields() {
         const contentType = contentTypeSelect.value;
+        
         if (contentType.includes('image')) {
+            // Show image upload, hide text content
             textContentGroup.classList.add('hidden');
             imageUploadGroup.classList.remove('hidden');
+            markdownHelp.classList.add('hidden');
         } else {
+            // Show text content, hide image upload
             textContentGroup.classList.remove('hidden');
             imageUploadGroup.classList.add('hidden');
+            
+            // Show markdown help only for markdown content type
+            if (contentType === 'text/markdown') {
+                contentTextarea.placeholder = 'Write your markdown content here...\n\nTry using **bold**, *italic*, or # headings!';
+            } else {
+                contentTextarea.placeholder = 'Write your entry content here...';
+            }
         }
     }
-    
+
     contentTypeSelect.addEventListener('change', toggleContentFields);
     toggleContentFields(); // Run on page load
 </script>

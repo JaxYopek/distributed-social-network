@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-
+{% load markdown_extras %}
 {% block title %}Stream - Social Distribution{% endblock %}
 
 {% block content %}
@@ -144,10 +144,10 @@
                 ChatGPT 4.5, OpenAI, 10-18-2025, https://chatgpt.com/c/68f02d9a-dea8-8324-a793-4ebc9004bc46 -->
                 {% if "image" in entry.content_type %}
                     <img src="data:{{ entry.content_type }};base64,{{ entry.content }}" alt="{{ entry.title }}">
-                {% else %}
-                    <p>
-                        {{ entry.content|truncatewords:50 }}
-                    </p>
+                    {% else %}
+                    <div class="markdown-content">
+                        {{ entry.content|render_markdown|safe }}
+                    </div>
                 {% endif %}
             </div>
             <!-- Entry actions -->

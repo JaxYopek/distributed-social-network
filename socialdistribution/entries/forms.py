@@ -23,7 +23,7 @@ class EntryForm(forms.Form):
     content_type = forms.ChoiceField(
         choices=[('text/plain', 'Plain Text'),
                  ('image/png;base64', 'Image'),
-                 # TODO: Add markdown in next iteration
+                 ('text/markdown', 'Markdown'),
         ],
         initial='text/plain',
         label='Content Type'

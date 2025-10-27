@@ -123,11 +123,26 @@
         {% endif %}
     </div>
 
+    {% load markdown_extras %}
+
     <div class="entry-content">
-        {% if "image" in entry.content_type %}
-            <img src="data:{{ entry.content_type }};base64,{{ entry.content }}" alt="{{ entry.title }}">
+        {% if entry.content_type == 'text/markdown' %}
+            <!-- Render markdown as HTML -->
+            {{ entry.content|render_markdown }}
+        
+        {% elif entry.content_type == 'text/plain' %}
+            <!-- Display plain text with line breaks -->
+            <pre>{{ entry.content }}</pre>
+        
+        {% elif 'image/' in entry.content_type %}
+            <!-- Display image -->
+            <img src="{% url 'api:entry-image' entry.author.id entry.id %}" 
+                 alt="{{ entry.title }}"
+                 class="img-fluid">
+        
         {% else %}
-            <p>{{ entry.content }}</p>
+            <!-- Fallback -->
+            {{ entry.content }}
         {% endif %}
     </div>
 
