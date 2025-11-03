@@ -1,5 +1,7 @@
 from django.shortcuts import render, redirect, get_object_or_404
 from django.contrib.auth.decorators import login_required
+from django.utils.http import url_has_allowed_host_and_scheme
+from django.views.decorators.http import require_POST
 from django.contrib import messages
 from django.views.generic import ListView, DetailView
 from django.core.exceptions import PermissionDenied
@@ -155,6 +157,7 @@ def view_entry(request, entry_id):
         raise Http404("Invalid entry ID")
 
     entry = get_object_or_404(Entry, id=entry_uuid)
+    liked_users = entry.liked_by.all()
 
     # Deleted entries hidden from non-staff
     if entry.visibility == "DELETED" and not request.user.is_staff:
@@ -164,8 +167,30 @@ def view_entry(request, entry_id):
     if not entry.can_view(request.user):
         raise PermissionDenied
 
-    context = {"entry": entry}
+    context = {"entry": entry, "liked_users": liked_users}
     return render(request, "entries/view_entry.html", context)
+
+@login_required
+@require_POST
+def like_entry(request, entry_id):
+    try:
+        entry_uuid = uuid.UUID(str(entry_id))
+    except (ValueError, TypeError):
+        raise Http404("Invalid entry ID")
+
+    entry = get_object_or_404(Entry, id=entry_uuid)
+
+    if not entry.can_view(request.user):
+        raise PermissionDenied
+
+    entry.liked_by.add(request.user)
+
+    next_url = request.POST.get("next")
+    if next_url and url_has_allowed_host_and_scheme(
+        next_url, allowed_hosts={request.get_host()}
+    ):
+        return redirect(next_url)
+    return redirect("entries:view_entry", entry_id=entry.id)
 
 @login_required
 def my_entries(request):

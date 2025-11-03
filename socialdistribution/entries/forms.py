@@ -19,6 +19,14 @@ class EntryForm(forms.Form):
             'rows': 2
         })
     )
+
+    likes = forms.IntegerField(
+        required=True,
+        label='Likes',
+        min_value=0,
+        initial=0,
+        widget=forms.NumberInput(attrs={'placeholder': 'Number of likes'})
+    )
     
     content_type = forms.ChoiceField(
         choices=[('text/plain', 'Plain Text'),

@@ -41,7 +41,11 @@ class Entry(models.Model):
         choices=CONTENT_TYPE_CHOICES, 
         default='text/plain'
     )
+    liked_by = models.ManyToManyField(User, related_name='liked_entries', blank=True)
     
+    @property
+    def likes_count(self):
+        return self.liked_by.count()    
    
     author = models.ForeignKey(Author, on_delete=models.CASCADE, related_name='entries')
     
