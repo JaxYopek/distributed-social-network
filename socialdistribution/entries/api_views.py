@@ -12,6 +12,8 @@ from .models import Entry, Visibility, Comment
 from authors.models import FollowRequestStatus, Author
 from authors.serializers import AuthorSerializer
 from .serializers import EntrySerializer, CommentSerializer
+from django.http import JsonResponse
+import commonmark
 
 
 def resolve_author_or_404(identifier: str) -> Author:
@@ -510,3 +512,19 @@ class CommentLikeView(APIView):
         comment.liked_by.add(request.user)
         serializer = CommentSerializer(comment, context={"request": request})
         return Response(serializer.data, status=status.HTTP_200_OK)
+
+def render_markdown_entry(request, entry_id):
+    """
+    Renders the Markdown content of an entry into HTML.
+    """
+    # Fetch the entry with the given ID and ensure it has content_type="text/markdown"
+    entry = get_object_or_404(Entry, id=entry_id, content_type="text/markdown")
+
+    # Render the Markdown content to HTML
+    parser = commonmark.Parser()
+    renderer = commonmark.HtmlRenderer()
+    parsed = parser.parse(entry.content)
+    rendered_content = renderer.render(parsed)
+
+    # Return the rendered content as JSON
+    return JsonResponse({"rendered_content": rendered_content})
