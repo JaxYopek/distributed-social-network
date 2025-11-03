@@ -33,11 +33,27 @@
     .hidden {
         display: none;
     }
+    .markdown-help {
+    margin-top: 8px;
+    padding: 10px;
+    background-color: #f8f9fa;
+    border-left: 3px solid #1E90FF;
+    font-size: 13px;
+    border-radius: 4px;
+}
+.markdown-help strong {
+    color: #1E90FF;
+}
+.markdown-help code {
+    background-color: #e9ecef;
+    padding: 2px 6px;
+    border-radius: 3px;
+    font-family: monospace;
+}
 </style>
-
 <div class="card">
     <h2>Create New Entry</h2>
-    <form method="post" enctype="multipart/form-data">  
+    <form method="post" enctype="multipart/form-data">
         {% csrf_token %}
         
         <div class="form-group">
@@ -52,17 +68,20 @@
         
         <div class="form-group">
             <label for="id_content_type">Content Type</label>
-            <select id="id_content_type" name="content_type">
-                <option value="text/plain">Plain Text</option>
-                <option value="image/png;base64">Image</option>
-            </select>
+            {{ form.content_type }}
         </div>
-        
         <div id="text-content-group" class="form-group">
             <label for="id_content">Content</label>
             <textarea name="content" id="id_content" placeholder="Write your entry content here..." rows="10"></textarea>
         </div>
-        
+        <!-- Markdown Image Upload (only shown for Markdown content type) -->
+        <div id="markdown-image-upload" class="form-group hidden" style="margin-top:15px;">
+            <label><strong>Upload Image for Markdown</strong></label><br>
+            <input type="file" id="markdown-image-file" accept="image/*">
+            <button type="button" id="markdown-upload-btn">Upload</button>
+            <div id="markdown-upload-result" style="margin-top:8px; font-size:14px; color:#333;"></div>
+        </div>
+  
         <div id="image-upload-group" class="form-group hidden">
             <label for="image-upload">Upload Image</label>
             <input type="file" name="image" id="image-upload" accept="image/png,image/jpeg,image/jpg">
@@ -75,33 +94,75 @@
                 <option value="FRIENDS">Friends Only</option>
                 <option value="UNLISTED">Unlisted</option>
             </select>
-        </div>        
+        </div>
         
         <button type="submit">Create Entry</button>
-        
         <div class="link">
             <a href="{% url 'stream' %}">Cancel</a>
         </div>
     </form>
 </div>
+
 <script>
-    // Show/hide content fields based on content type
-    const contentTypeSelect = document.getElementById('id_content_type');
-    const textContentGroup = document.getElementById('text-content-group');
-    const imageUploadGroup = document.getElementById('image-upload-group');
+    document.addEventListener("DOMContentLoaded", () => {
+        const contentTypeSelect = document.getElementById('id_content_type');
+        const textContentGroup = document.getElementById('text-content-group');
+        const imageUploadGroup = document.getElementById('image-upload-group');
+        const contentTextarea = document.getElementById('id_content');
+        const markdownUpload = document.getElementById('markdown-image-upload');
+        const uploadBtn = document.getElementById('markdown-upload-btn');
     
-    function toggleContentFields() {
-        const contentType = contentTypeSelect.value;
-        if (contentType.includes('image')) {
-            textContentGroup.classList.add('hidden');
-            imageUploadGroup.classList.remove('hidden');
-        } else {
-            textContentGroup.classList.remove('hidden');
-            imageUploadGroup.classList.add('hidden');
+        function toggleContentFields() {
+            const contentType = contentTypeSelect.value;
+    
+            if (contentType.includes('image')) {
+                textContentGroup.classList.add('hidden');
+                imageUploadGroup.classList.remove('hidden');
+                markdownUpload.classList.add('hidden');
+            } else {
+                textContentGroup.classList.remove('hidden');
+                imageUploadGroup.classList.add('hidden');
+    
+                if (contentType === 'text/markdown') {
+                    markdownUpload.classList.remove('hidden');
+                    contentTextarea.placeholder =
+                        'Write your markdown content here...\n\nUse **bold**, *italic*, or embed images below.';
+                } else {
+                    markdownUpload.classList.add('hidden');
+                    contentTextarea.placeholder = 'Write your entry content here...';
+                }
+            }
         }
-    }
     
-    contentTypeSelect.addEventListener('change', toggleContentFields);
-    toggleContentFields(); // Run on page load
-</script>
+        // Attach listeners
+        contentTypeSelect.addEventListener('change', toggleContentFields);
+        toggleContentFields(); // run once on load
+    
+        // Upload button handler
+        uploadBtn.addEventListener("click", async () => {
+            const file = document.getElementById("markdown-image-file").files[0];
+            if (!file) return alert("Select an image first.");
+    
+            const formData = new FormData();
+            formData.append("image", file);
+    
+            const response = await fetch("{% url 'api:upload_image' %}", {
+                method: "POST",
+                body: formData,
+                headers: { "X-CSRFToken": "{{ csrf_token }}" },
+            });
+    
+            const data = await response.json();
+            const result = document.getElementById("markdown-upload-result");
+    
+            if (data.url) {
+                result.innerHTML = `✅ Uploaded! Copy this Markdown:<br>
+                <code>![Alt text](${data.url})</code>`;
+            } else {
+                result.innerHTML = "❌ Upload failed.";
+            }
+        });
+    });
+    </script>
+    
 {% endblock %}

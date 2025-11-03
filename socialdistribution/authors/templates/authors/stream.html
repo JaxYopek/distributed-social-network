@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-
+{% load markdown_extras %}
 {% block title %}Stream - Social Distribution{% endblock %}
 
 {% block content %}
@@ -113,6 +113,16 @@
         <div class="card" style="margin-bottom: 20px;">
             <!-- Entry header with author info -->
             <div style="display: flex; align-items: center; margin-bottom: 15px; padding-bottom: 10px; border-bottom: 1px solid #eee;">
+                {% if entry.author.profile_image %}
+                    <img src="{{ entry.author.profile_image }}" 
+                         alt="{{ entry.author.display_name }}" 
+                         style="width: 40px; height: 40px; border-radius: 50%; object-fit: cover; margin-right: 10px;">
+                {% else %}
+                    <div style="width: 40px; height: 40px; border-radius: 50%; background: #ddd; display: flex; align-items: center; justify-content: center; font-weight: bold; color: #555; margin-right: 10px;">
+                        {{ entry.author.display_name|first|upper }}
+                    </div>
+                {% endif %}
+                
                 <div style="flex-grow: 1;">
                     <div style="font-weight: 500; color: #333; margin-bottom: 3px;">
                         <a href="{% url 'authors:profile_detail' entry.author.id %}" style="color: #1E90FF; text-decoration: none;">
@@ -144,10 +154,10 @@
                 ChatGPT 4.5, OpenAI, 10-18-2025, https://chatgpt.com/c/68f02d9a-dea8-8324-a793-4ebc9004bc46 -->
                 {% if "image" in entry.content_type %}
                     <img src="data:{{ entry.content_type }};base64,{{ entry.content }}" alt="{{ entry.title }}">
-                {% else %}
-                    <p>
-                        {{ entry.content|truncatewords:50 }}
-                    </p>
+                    {% else %}
+                    <div class="markdown-content">
+                        {{ entry.content|render_markdown|safe }}
+                    </div>
                 {% endif %}
             </div>
             <!-- Entry actions -->

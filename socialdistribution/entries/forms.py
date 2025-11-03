@@ -1,5 +1,5 @@
 from django import forms
-from .models import Entry, Visibility
+from .models import Entry, Visibility, Comment
 
 class EntryForm(forms.Form):
     """Form for creating and editing entries"""
@@ -22,8 +22,8 @@ class EntryForm(forms.Form):
     
     content_type = forms.ChoiceField(
         choices=[('text/plain', 'Plain Text'),
-                 ('image/png;base64', 'Image'),
-                 # TODO: Add markdown in next iteration
+                 ('image', 'Image'),
+                 ('text/markdown', 'Markdown'),
         ],
         initial='text/plain',
         label='Content Type'
@@ -76,3 +76,28 @@ class EntryForm(forms.Form):
                 cleaned_data['image'] = None  # Clear image if type is text
 
         return cleaned_data
+
+
+class CommentForm(forms.ModelForm):
+    """Form for creating comments on entries."""
+
+    class Meta:
+        model = Comment
+        fields = ["content"]
+        widgets = {
+            "content": forms.Textarea(
+                attrs={
+                    "rows": 3,
+                    "placeholder": "Share your thoughts...",
+                }
+            )
+        }
+        labels = {
+            "content": "Comment",
+        }
+
+    def clean_content(self):
+        content = self.cleaned_data.get("content", "").strip()
+        if not content:
+            raise forms.ValidationError("Comment cannot be empty.")
+        return content

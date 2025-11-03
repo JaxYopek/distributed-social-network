@@ -24,7 +24,7 @@ class Entry(models.Model):
     
     CONTENT_TYPE_CHOICES = [
         ('text/plain', 'Plain Text'),
-       # ('text/markdown', 'Markdown'), 
+        ('text/markdown', 'Markdown'), 
         ('image/png;base64', 'PNG Image'),
         ('image/jpeg;base64', 'JPEG Image'),
     ]
@@ -41,7 +41,11 @@ class Entry(models.Model):
         choices=CONTENT_TYPE_CHOICES, 
         default='text/plain'
     )
+    liked_by = models.ManyToManyField(User, related_name='liked_entries', blank=True)
     
+    @property
+    def likes_count(self):
+        return self.liked_by.count()    
    
     author = models.ForeignKey(Author, on_delete=models.CASCADE, related_name='entries')
     
@@ -52,6 +56,14 @@ class Entry(models.Model):
         default=Visibility.PUBLIC,
     )
     
+    # To keep track of which GitHub activity this entry came from
+    source_id = models.CharField(
+    max_length=255,
+    blank=True,
+    null=True,
+    unique=True,
+)
+
     def can_view(self, user) -> bool:
         """
         Returns True if the given user can view this entry.
@@ -105,4 +117,37 @@ class Entry(models.Model):
     
     def __str__(self):
         return f"{self.title} by {self.author.display_name}"
+
+
+class Comment(models.Model):
+    """User-submitted comment attached to an entry."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    entry = models.ForeignKey(
+        Entry,
+        on_delete=models.CASCADE,
+        related_name="comments",
+    )
+    author = models.ForeignKey(
+        Author,
+        on_delete=models.CASCADE,
+        related_name="comments",
+    )
+    content = models.TextField()
+    created_at = models.DateTimeField(auto_now_add=True)
+    liked_by = models.ManyToManyField(
+        User,
+        related_name="liked_comments",
+        blank=True,
+    )
+
+    @property
+    def likes_count(self):
+        return self.liked_by.count()
+
+    class Meta:
+        ordering = ["created_at"]
+
+    def __str__(self):
+        return f"Comment by {self.author} on {self.entry}"
 

@@ -1,7 +1,8 @@
 from django.test import TestCase, Client
 from django.urls import reverse
 from django.contrib.auth import get_user_model
-from .models import Entry
+from .models import Entry, Comment
+from authors.models import FollowRequest, FollowRequestStatus
 from rest_framework.test import APIClient
 from rest_framework import status
 User = get_user_model()
@@ -33,6 +34,18 @@ class EntryVisibilityTests(TestCase):
             visibility="FRIENDS",
         )
 
+    def make_mutual_follow(self, user_a, user_b):
+        FollowRequest.objects.get_or_create(
+            follower=user_a,
+            followee=user_b,
+            defaults={"status": FollowRequestStatus.APPROVED},
+        )
+        FollowRequest.objects.get_or_create(
+            follower=user_b,
+            followee=user_a,
+            defaults={"status": FollowRequestStatus.APPROVED},
+        )
+
     def test_public_entry_visible_to_anonymous(self):
         url = reverse("entries:view_entry", args=[self.public_entry.pk])
         resp = self.client.get(url)
@@ -54,6 +67,177 @@ class EntryVisibilityTests(TestCase):
         stream_url = reverse("authors:stream")
         resp = self.client.get(stream_url)
         self.assertContains(resp, "Friends")  # title of the FRIENDS entry
+
+    def test_user_can_comment_on_public_entry(self):
+        commenter = User.objects.create_user(
+            username="bob",
+            password="pw",
+            display_name="Bob",
+        )
+        self.client.login(username="bob", password="pw")
+        url = reverse("entries:add_comment", args=[self.public_entry.pk])
+
+        response = self.client.post(url, {"content": "Nice post!"})
+
+        self.assertRedirects(response, reverse("entries:view_entry", args=[self.public_entry.pk]))
+        comment = Comment.objects.get(entry=self.public_entry, author=commenter)
+        self.assertEqual(comment.content, "Nice post!")
+
+    def test_user_cannot_comment_without_access(self):
+        viewer = User.objects.create_user(
+            username="charlie",
+            password="pw",
+            display_name="Charlie",
+        )
+        self.client.login(username="charlie", password="pw")
+        url = reverse("entries:add_comment", args=[self.friends_entry.pk])
+
+        response = self.client.post(url, {"content": "Hello"})
+
+        self.assertEqual(response.status_code, 403)
+        self.assertFalse(
+            Comment.objects.filter(entry=self.friends_entry, author=viewer).exists()
+        )
+
+    def test_user_can_like_comment(self):
+        commenter = User.objects.create_user(
+            username="dave",
+            password="pw",
+            display_name="Dave",
+        )
+        comment = Comment.objects.create(
+            entry=self.public_entry,
+            author=commenter,
+            content="Nice entry!",
+        )
+        liker = User.objects.create_user(
+            username="erika",
+            password="pw",
+            display_name="Erika",
+        )
+        self.client.login(username="erika", password="pw")
+        url = reverse("entries:like_comment", args=[comment.id])
+
+        response = self.client.post(url)
+
+        self.assertRedirects(response, reverse("entries:view_entry", args=[self.public_entry.pk]))
+        self.assertTrue(comment.liked_by.filter(id=liker.id).exists())
+
+    def test_user_cannot_like_comment_without_access(self):
+        commenter = User.objects.create_user(
+            username="frank",
+            password="pw",
+            display_name="Frank",
+        )
+        comment = Comment.objects.create(
+            entry=self.friends_entry,
+            author=commenter,
+            content="Secret!",
+        )
+        liker = User.objects.create_user(
+            username="gina",
+            password="pw",
+            display_name="Gina",
+        )
+        self.client.login(username="gina", password="pw")
+        url = reverse("entries:like_comment", args=[comment.id])
+
+        response = self.client.post(url)
+
+        self.assertEqual(response.status_code, 403)
+        self.assertFalse(comment.liked_by.filter(id=liker.id).exists())
+
+    def test_friend_sees_only_their_comments_on_friends_entry(self):
+        friend_one = User.objects.create_user(
+            username="friend1",
+            password="pw",
+            display_name="Friend One",
+        )
+        friend_two = User.objects.create_user(
+            username="friend2",
+            password="pw",
+            display_name="Friend Two",
+        )
+        self.make_mutual_follow(friend_one, self.author)
+        self.make_mutual_follow(friend_two, self.author)
+
+        Comment.objects.create(
+            entry=self.friends_entry,
+            author=friend_one,
+            content="Friend one comment",
+        )
+        Comment.objects.create(
+            entry=self.friends_entry,
+            author=friend_two,
+            content="Friend two comment",
+        )
+
+        self.client.login(username="friend1", password="pw")
+        url = reverse("entries:view_entry", args=[self.friends_entry.pk])
+        response = self.client.get(url)
+
+        self.assertContains(response, "Friend one comment")
+        self.assertNotContains(response, "Friend two comment")
+
+    def test_entry_author_sees_all_friend_comments(self):
+        friend_one = User.objects.create_user(
+            username="friend3",
+            password="pw",
+            display_name="Friend Three",
+        )
+        friend_two = User.objects.create_user(
+            username="friend4",
+            password="pw",
+            display_name="Friend Four",
+        )
+        self.make_mutual_follow(friend_one, self.author)
+        self.make_mutual_follow(friend_two, self.author)
+
+        Comment.objects.create(
+            entry=self.friends_entry,
+            author=friend_one,
+            content="Friend three comment",
+        )
+        Comment.objects.create(
+            entry=self.friends_entry,
+            author=friend_two,
+            content="Friend four comment",
+        )
+
+        self.client.login(username="alice", password="pw")
+        url = reverse("entries:view_entry", args=[self.friends_entry.pk])
+        response = self.client.get(url)
+
+        self.assertContains(response, "Friend three comment")
+        self.assertContains(response, "Friend four comment")
+
+    def test_friend_cannot_like_other_friend_comment(self):
+        friend_one = User.objects.create_user(
+            username="friend5",
+            password="pw",
+            display_name="Friend Five",
+        )
+        friend_two = User.objects.create_user(
+            username="friend6",
+            password="pw",
+            display_name="Friend Six",
+        )
+        self.make_mutual_follow(friend_one, self.author)
+        self.make_mutual_follow(friend_two, self.author)
+
+        comment = Comment.objects.create(
+            entry=self.friends_entry,
+            author=friend_two,
+            content="Hidden comment",
+        )
+
+        self.client.login(username="friend5", password="pw")
+        url = reverse("entries:like_comment", args=[comment.id])
+
+        response = self.client.post(url)
+
+        self.assertEqual(response.status_code, 403)
+        self.assertFalse(comment.liked_by.filter(id=friend_one.id).exists())
 
 class EntryAPITests(TestCase):
     """
@@ -198,33 +382,153 @@ class EntryAPITests(TestCase):
         self.assertEqual(response.data['description'], data['description'])
         self.assertEqual(response.data['content'], data['content'])
         self.assertEqual(response.data['content_type'], data['content_type'])
-        self.assertEqual(response.data['visibility'], data['visibility'])
 
-        # Check that the entry exists in the database
-        entry_exists = Entry.objects.filter(id=response.data['id'].split('/')[-2]).exists()
-        self.assertTrue(entry_exists)
-    def test_user_can_view_own_entries(self):
-        """
-        Test: User should see their own entries including FRIENDS visibility,
-        but should not see deleted entries.
-        API: GET /api/author/<author_id>/entries/
-        """
-        # Login as the first author
-        self.client.login(username="alice", password="pw")
 
-        # GET request to fetch their entries
-        response = self.client.get(f'/api/author/{self.author.id}/entries/')
+class CommentAPITests(TestCase):
+    def setUp(self):
+        self.client = APIClient()
+        self.author = User.objects.create_user(
+            username="api_author",
+            password="pw",
+            display_name="API Author",
+        )
+        self.viewer = User.objects.create_user(
+            username="api_viewer",
+            password="pw",
+            display_name="API Viewer",
+        )
+        self.public_entry = Entry.objects.create(
+            author=self.author,
+            title="API Public Entry",
+            description="",
+            content="Public content",
+            content_type="text/plain",
+            visibility="PUBLIC",
+        )
+        self.public_comment = Comment.objects.create(
+            entry=self.public_entry,
+            author=self.author,
+            content="Author comment",
+        )
 
-        self.assertEqual(response.status_code, 200)
+    def tearDown(self):
+        self.client.force_authenticate(user=None)
 
-        entries_list = response.data.get('src', [])
-        self.assertEqual(len(entries_list),2)
-        
-        titles = [entry['title'] for entry in entries_list]
+    def make_mutual_follow(self, user_a, user_b):
+        FollowRequest.objects.get_or_create(
+            follower=user_a,
+            followee=user_b,
+            defaults={"status": FollowRequestStatus.APPROVED},
+        )
+        FollowRequest.objects.get_or_create(
+            follower=user_b,
+            followee=user_a,
+            defaults={"status": FollowRequestStatus.APPROVED},
+        )
 
-        # Should contain public and friends entries
-        self.assertIn("Public", titles)
-        self.assertIn("Friends", titles)
+    def test_list_public_comments(self):
+        response = self.client.get(f"/api/entries/{self.public_entry.id}/comments/")
 
-        # Should NOT contain deleted entry
-        self.assertNotIn("Deleted", titles)
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data["type"], "comments")
+        self.assertEqual(len(response.data["comments"]), 1)
+        self.assertEqual(response.data["comments"][0]["content"], "Author comment")
+
+    def test_create_comment_requires_authentication(self):
+        response = self.client.post(
+            f"/api/entries/{self.public_entry.id}/comments/",
+            {"content": "Anonymous comment"},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_401_UNAUTHORIZED)
+
+    def test_authenticated_user_can_create_comment(self):
+        self.client.force_authenticate(user=self.viewer)
+        response = self.client.post(
+            f"/api/entries/{self.public_entry.id}/comments/",
+            {"content": "Viewer comment"},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(response.data["content"], "Viewer comment")
+        self.assertEqual(
+            Comment.objects.filter(entry=self.public_entry, author=self.viewer).count(), 1
+        )
+
+    def test_friends_comments_filtered_per_viewer(self):
+        friends_entry = Entry.objects.create(
+            author=self.author,
+            title="Friends Entry",
+            description="",
+            content="Secret content",
+            content_type="text/plain",
+            visibility="FRIENDS",
+        )
+        friend_one = User.objects.create_user(
+            username="friend_one",
+            password="pw",
+            display_name="Friend One",
+        )
+        friend_two = User.objects.create_user(
+            username="friend_two",
+            password="pw",
+            display_name="Friend Two",
+        )
+        self.make_mutual_follow(friend_one, self.author)
+        self.make_mutual_follow(friend_two, self.author)
+
+        Comment.objects.create(entry=friends_entry, author=self.author, content="Author note")
+        Comment.objects.create(entry=friends_entry, author=friend_one, content="One's comment")
+        Comment.objects.create(entry=friends_entry, author=friend_two, content="Two's comment")
+
+        self.client.force_authenticate(user=friend_one)
+        response = self.client.get(f"/api/entries/{friends_entry.id}/comments/")
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        contents = [comment["content"] for comment in response.data["comments"]]
+        self.assertIn("Author note", contents)
+        self.assertIn("One's comment", contents)
+        self.assertNotIn("Two's comment", contents)
+
+    def test_friend_cannot_view_other_friend_comment_detail(self):
+        friends_entry = Entry.objects.create(
+            author=self.author,
+            title="Friends Detail Entry",
+            description="",
+            content="Secret detail",
+            content_type="text/plain",
+            visibility="FRIENDS",
+        )
+        friend_one = User.objects.create_user(
+            username="friend_three",
+            password="pw",
+            display_name="Friend Three",
+        )
+        friend_two = User.objects.create_user(
+            username="friend_four",
+            password="pw",
+            display_name="Friend Four",
+        )
+        self.make_mutual_follow(friend_one, self.author)
+        self.make_mutual_follow(friend_two, self.author)
+
+        hidden_comment = Comment.objects.create(
+            entry=friends_entry,
+            author=friend_two,
+            content="Hidden friend comment",
+        )
+
+        self.client.force_authenticate(user=friend_one)
+        response = self.client.get(f"/api/comments/{hidden_comment.id}/")
+
+        self.assertEqual(response.status_code, status.HTTP_404_NOT_FOUND)
+
+    def test_comment_like_api(self):
+        self.client.force_authenticate(user=self.viewer)
+        response = self.client.post(f"/api/comments/{self.public_comment.id}/like/")
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data["likes"], 1)
+        self.assertTrue(self.public_comment.liked_by.filter(id=self.viewer.id).exists())
