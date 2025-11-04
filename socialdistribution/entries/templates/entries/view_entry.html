@@ -218,7 +218,7 @@
     <div class="entry-content">
         {% if entry.content_type == 'text/markdown' %}
             <!-- Render markdown as HTML -->
-            {{ entry.content|render_markdown }}
+            {{ entry.content|render_markdown|safe }}
         
         {% elif entry.content_type == 'text/plain' %}
             <!-- Display plain text with line breaks -->
@@ -226,8 +226,19 @@
             
         {% elif "image" in entry.content_type %}
         <img src="data:{{ entry.content_type }};base64,{{ entry.content }}" 
-                alt="{{ entry.title }}" 
-                class="img-fluid">
+            alt="{{ entry.title }}"
+            class="img-fluid">
+            {% if image_url %}
+            <div style="margin-top: 12px; font-size: 14px;">
+              <strong>Direct Image Link:</strong>
+              <input type="text"
+                     value="{{ image_url }}"
+                     readonly
+                     onclick="this.select(); document.execCommand('copy'); alert('Copied!');"
+                     style="width: 100%; padding: 6px 10px; border: 1px solid #ddd; border-radius: 4px; font-size: 13px; cursor: pointer; background: #f9f9f9;">
+            </div>
+            {% endif %}
+            
         
         {% else %}
             <!-- Fallback -->

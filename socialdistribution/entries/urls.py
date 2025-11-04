@@ -13,4 +13,5 @@ urlpatterns = [
     path('<uuid:entry_id>/comments/', views.add_comment, name='add_comment'),
     path('comments/<uuid:comment_id>/like/', views.like_comment, name='like_comment'),
     path('public/', views.PublicEntriesListView.as_view(), name='public_entries'),
+    path("<uuid:author_id>/<uuid:entry_id>/image/", views.entry_image, name="entry_image"),
 ]

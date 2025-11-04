@@ -5,13 +5,15 @@ from django.views.decorators.http import require_POST
 from django.contrib import messages
 from django.views.generic import ListView, DetailView
 from django.core.exceptions import PermissionDenied
-from django.http import Http404, JsonResponse
+from django.http import Http404, JsonResponse, HttpResponse
 from django.core.files.storage import default_storage
 from .models import Entry, Visibility, Comment
 from .forms import EntryForm, CommentForm
 import uuid
 import base64
 from django.conf import settings
+from django.urls import reverse
+
 
 class PublicEntriesListView(ListView):
     model = Entry
@@ -52,7 +54,7 @@ def create_entry(request):
                 title=form.cleaned_data['title'],
                 description=form.cleaned_data['description'],
                 content=content,
-                content_type=form.cleaned_data['content_type'],
+                content_type=content_type,
                 visibility=form.cleaned_data['visibility']
             )
             messages.success(request, 'Entry created successfully!')
@@ -160,6 +162,13 @@ def view_entry(request, entry_id):
     entry = get_object_or_404(Entry, id=entry_uuid)
     liked_users = entry.liked_by.all()
 
+    if entry.content_type.startswith("image/"):
+        image_url = request.build_absolute_uri(
+            reverse("entries:entry_image", args=[entry.author.id, entry.id])
+        )
+    else:
+        image_url = None
+
     # Deleted entries hidden from non-staff
     if entry.visibility == "DELETED" and not request.user.is_staff:
         raise Http404("Entry not found")
@@ -187,8 +196,26 @@ def view_entry(request, entry_id):
             and request.user.is_authenticated
             and request.user != entry.author
         ),
+        "image_url": image_url,
     }
     return render(request, "entries/view_entry.html", context)
+
+
+
+def entry_image(request, author_id, entry_id):
+    """Return the raw image data for an image-type entry so it can be embedded."""
+    entry = get_object_or_404(Entry, id=entry_id, author_id=author_id)
+
+    # Only serve actual image posts
+    if not entry.content_type.startswith("image/"):
+        raise Http404("This entry is not an image.")
+
+    # Decode the stored base64 image data
+    image_data = base64.b64decode(entry.content)
+    mime_type = entry.content_type.split(";")[0]  # e.g. "image/png"
+
+    return HttpResponse(image_data, content_type=mime_type)
+
 
 @login_required
 @require_POST
