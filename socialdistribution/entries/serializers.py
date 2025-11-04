@@ -16,7 +16,10 @@ class EntrySerializer(serializers.ModelSerializer):
     id = serializers.SerializerMethodField()
     web = serializers.SerializerMethodField()
     author = AuthorSerializer(read_only=True)
-    contentType = serializers.CharField(source="content_type")
+    content_type = serializers.ChoiceField(                    # content_type - for internal use
+        choices=Entry.CONTENT_TYPE_CHOICES, required=False
+    )
+    contentType = serializers.SerializerMethodField()          # contentType - for API compatibility
     comments = serializers.SerializerMethodField()
     likes = serializers.SerializerMethodField()
 
@@ -32,6 +35,7 @@ class EntrySerializer(serializers.ModelSerializer):
             "title",
             "description",
             "contentType",
+            "content_type",
             "content",
             "visibility",
             "published",
@@ -63,18 +67,21 @@ class EntrySerializer(serializers.ModelSerializer):
     def get_likes(self, obj):
         request = self.context.get("request")
         likes_qs = obj.liked_by.all()
-        page = int(request.query_params.get("like_page", 1))
-        size = int(request.query_params.get("like_size", 50))
+        page = int(request.query_params.get("like_page", 1)) if request else 1
+        size = int(request.query_params.get("like_size", 50)) if request else 50
         start = (page - 1) * size
         end = start + size
         entry_api_url = self.get_id(obj)
         entry_html_url = self.get_web(obj)
-        likes_url = request.build_absolute_uri(
-            reverse("api:entry-likes", args=[obj.id])
+        likes_url = (
+            request.build_absolute_uri(reverse("api:entry-likes", args=[obj.id]))
+            if request
+            else ""
         )
         likes_page = likes_qs[start:end]
         src = []
         for author in likes_page:
+            like_id = f"{likes_url}{author.id}/" if likes_url else ""
             src.append(
                 {
                     "type": "like",
@@ -82,7 +89,7 @@ class EntrySerializer(serializers.ModelSerializer):
                         author, context={"request": request}
                     ).data,
                     "published": obj.updated,
-                    "id": f"{likes_url}{author.id}/",
+                    "id": like_id,
                     "object": entry_html_url,
                 }
             )
@@ -95,6 +102,22 @@ class EntrySerializer(serializers.ModelSerializer):
             "count": likes_qs.count(),
             "src": src,
         }
+    
+    def get_contentType(self, obj):
+        return obj.content_type
+    
+    def to_internal_value(self, data):
+        mutable = data.copy()
+        if "contentType" in mutable and "content_type" not in mutable:
+            mutable["content_type"] = mutable["contentType"]
+        return super().to_internal_value(mutable)
+
+    def get_comments(self, obj):
+        request = self.context.get("request")
+        visible_comments = obj.comments.all()
+        return CommentSerializer(
+            visible_comments, many=True, context={"request": request}
+        ).data
 
 
 class CommentSerializer(serializers.ModelSerializer):

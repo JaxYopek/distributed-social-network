@@ -6,6 +6,7 @@ from .api_views import (
     MyEntriesListView,
     EntryEditDeleteView,
     EntryLikesListView,
+    EntryLikeView,
     AuthorEntryLikesListView,
     CommentLikesListView,
     AuthorLikedListView,
@@ -25,6 +26,7 @@ urlpatterns = [
     path("entries/<uuid:entry_id>/", EntryDetailView.as_view(), name="entry-detail"),
     path("author/<uuid:author_id>/entries/", MyEntriesListView.as_view(), name="author-entries"),
     path("entries/<uuid:entry_id>/likes/", EntryLikesListView.as_view(), name="entry-likes"),
+    path("entries/<uuid:entry_id>/like/", EntryLikeView.as_view(), name="entry-like"),
     path(
         "authors/<uuid:author_id>/entries/<uuid:entry_id>/likes/",
         AuthorEntryLikesListView.as_view(),

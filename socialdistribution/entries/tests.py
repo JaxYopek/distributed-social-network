@@ -532,3 +532,123 @@ class CommentAPITests(TestCase):
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertEqual(response.data["likes"], 1)
         self.assertTrue(self.public_comment.liked_by.filter(id=self.viewer.id).exists())
+
+class EntryLikesAPITests(TestCase):
+    def setUp(self):
+        self.client = APIClient()
+        self.author = User.objects.create_user(
+            username="likes_author",
+            password="pw",
+            display_name="Likes Author",
+        )
+        self.viewer = User.objects.create_user(
+            username="likes_viewer",
+            password="pw",
+            display_name="Likes Viewer",
+        )
+        self.friend = User.objects.create_user(
+            username="likes_friend",
+            password="pw",
+            display_name="Likes Friend",
+        )
+        self.public_entry = Entry.objects.create(
+            author=self.author,
+            title="Likeable Public Entry",
+            description="",
+            content="Public likeable content",
+            content_type="text/plain",
+            visibility="PUBLIC",
+        )
+        self.friends_entry = Entry.objects.create(
+            author=self.author,
+            title="Friends Like Entry",
+            description="",
+            content="Friends only content",
+            content_type="text/plain",
+            visibility="FRIENDS",
+        )
+
+    def tearDown(self):
+        self.client.force_authenticate(user=None)
+
+    def make_mutual_follow(self, user_a, user_b):
+        FollowRequest.objects.get_or_create(
+            follower=user_a,
+            followee=user_b,
+            defaults={"status": FollowRequestStatus.APPROVED},
+        )
+        FollowRequest.objects.get_or_create(
+            follower=user_b,
+            followee=user_a,
+            defaults={"status": FollowRequestStatus.APPROVED},
+        )
+
+    def test_like_public_entry_requires_authentication(self):
+        response = self.client.post(f"/api/entries/{self.public_entry.id}/like/")
+        self.assertEqual(response.status_code, status.HTTP_401_UNAUTHORIZED)
+        self.assertEqual(self.public_entry.liked_by.count(), 0)
+
+    def test_authenticated_user_can_like_public_entry(self):
+        self.client.force_authenticate(user=self.viewer)
+        response = self.client.post(f"/api/entries/{self.public_entry.id}/like/")
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.public_entry.refresh_from_db()
+        self.assertEqual(self.public_entry.liked_by.count(), 1)
+        self.assertTrue(self.public_entry.liked_by.filter(id=self.viewer.id).exists())
+        self.assertIn("likes", response.data)
+        self.assertGreaterEqual(response.data["likes"], 1)
+
+    def test_repeat_like_is_idempotent(self):
+        self.client.force_authenticate(user=self.viewer)
+        first = self.client.post(f"/api/entries/{self.public_entry.id}/like/")
+        second = self.client.post(f"/api/entries/{self.public_entry.id}/like/")
+
+        self.assertEqual(first.status_code, status.HTTP_200_OK)
+        self.assertEqual(second.status_code, status.HTTP_200_OK)
+        self.public_entry.refresh_from_db()
+        self.assertEqual(self.public_entry.liked_by.count(), 1)
+
+    def test_like_listing_shows_authenticated_liker(self):
+        self.client.force_authenticate(user=self.viewer)
+        self.client.post(f"/api/entries/{self.public_entry.id}/like/")
+
+        response = self.client.get(f"/api/entries/{self.public_entry.id}/likes/")
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data.get("type"), "likes")
+        self.assertIn("items", response.data)
+        liker_ids = {item.get("author", {}).get("id") for item in response.data["items"]}
+        self.assertIn(str(self.viewer.id), liker_ids)
+
+    def test_cannot_like_friends_entry_without_mutual_follow(self):
+        self.client.force_authenticate(user=self.viewer)
+        response = self.client.post(f"/api/entries/{self.friends_entry.id}/like/")
+
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+        self.friends_entry.refresh_from_db()
+        self.assertEqual(self.friends_entry.liked_by.count(), 0)
+
+    def test_friend_can_like_friends_entry(self):
+        self.make_mutual_follow(self.viewer, self.author)
+        self.client.force_authenticate(user=self.viewer)
+
+        response = self.client.post(f"/api/entries/{self.friends_entry.id}/like/")
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.friends_entry.refresh_from_db()
+        self.assertEqual(self.friends_entry.liked_by.count(), 1)
+        self.assertTrue(self.friends_entry.liked_by.filter(id=self.viewer.id).exists())
+
+    def test_author_can_view_friends_entry_likes(self):
+        self.make_mutual_follow(self.friend, self.author)
+        self.client.force_authenticate(user=self.friend)
+        self.client.post(f"/api/entries/{self.friends_entry.id}/like/")
+        self.client.force_authenticate(user=self.author)
+
+        response = self.client.get(f"/api/entries/{self.friends_entry.id}/likes/")
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data.get("type"), "likes")
+        liker_ids = {item.get("author", {}).get("id") for item in response.data.get("items", [])}
+        self.assertIn(str(self.friend.id), liker_ids)

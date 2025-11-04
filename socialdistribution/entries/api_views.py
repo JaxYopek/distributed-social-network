@@ -9,7 +9,7 @@ from django.http import Http404
 from django.db.models import Q
 from django.urls import reverse
 from .models import Entry, Visibility, Comment
-from authors.models import FollowRequestStatus, Author
+from authors.models import FollowRequest, FollowRequestStatus, Author
 from authors.serializers import AuthorSerializer
 from .serializers import EntrySerializer, CommentSerializer
 from django.http import JsonResponse
@@ -69,7 +69,10 @@ class LikeSerializerMixin:
         return str(author)
 
     def _serialize_author(self, request, author: Author) -> dict:
-        return AuthorSerializer(author, context={"request": request}).data
+        data = AuthorSerializer(author, context={"request": request}).data
+        data["apiId"] = data.get("id")
+        data["id"] = str(author.id)
+        return data
 
     def _build_entry_like_object(self, request, entry: Entry, liker: Author) -> dict:
         object_url = request.build_absolute_uri(reverse("api:entry-detail", args=[entry.id]))
@@ -207,6 +210,51 @@ class EntryEditDeleteView(generics.RetrieveUpdateDestroyAPIView):
 
         return entry
 
+class EntryLikeView(APIView):
+    """
+    POST /api/entries/<uuid:entry_id>/like/
+    """
+    permission_classes = [permissions.IsAuthenticated]
+
+    def post(self, request, entry_id):
+        entry = get_object_or_404(
+            Entry.objects.select_related("author"),
+            id=entry_id,
+        )
+
+        if entry.visibility == Visibility.DELETED:
+            raise Http404("Entry not found")
+
+        if not entry.can_view(request.user):
+            if entry.visibility == Visibility.FRIENDS:
+                return Response(
+                    {"detail": "Not friends with the author."},
+                    status=status.HTTP_403_FORBIDDEN,
+                )
+            raise Http404("Entry not found")
+
+        if entry.visibility == Visibility.FRIENDS and request.user != entry.author:
+            is_mutual = FollowRequest.objects.filter(
+                follower=request.user,
+                followee=entry.author,
+                status=FollowRequestStatus.APPROVED,
+            ).exists() and FollowRequest.objects.filter(
+                follower=entry.author,
+                followee=request.user,
+                status=FollowRequestStatus.APPROVED,
+            ).exists()
+            if not is_mutual:
+                return Response(
+                    {"detail": "Mutual follow required."},
+                    status=status.HTTP_403_FORBIDDEN,
+                )
+
+        entry.liked_by.add(request.user)
+        likes_count = entry.liked_by.count()
+        return Response(
+            {"type": "Like", "likes": likes_count},
+            status=status.HTTP_200_OK,
+        )
 
 class EntryLikesListView(LikeSerializerMixin, APIView):
     """
@@ -242,6 +290,7 @@ class EntryLikesListView(LikeSerializerMixin, APIView):
                 "page_number": page,
                 "size": size,
                 "count": count,
+                "items": src,
                 "src": src,
             }
         )
