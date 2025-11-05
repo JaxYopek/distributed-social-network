@@ -19,9 +19,9 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 SECRET_KEY = 'django-insecure-^0bws-#z@jo5(653=2axk0r+6@42%9$#%4s$gse^g+!+2xqkcx'
 
 # SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = True
+DEBUG = False
 
-ALLOWED_HOSTS = []
+ALLOWED_HOSTS = ["*"]
 
 # Application definition
 INSTALLED_APPS = [
@@ -144,3 +144,5 @@ SPECTACULAR_SETTINGS = {
 CRONJOBS = [
     ('*/60 * * * *', 'django.core.management.call_command', ['sync_github']),
 ]
+
+SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
