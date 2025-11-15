@@ -53,11 +53,10 @@ function renderAuthors(authors) {
     const authorItems = authors.map(author => {
         const isRemote = author._is_remote || false;
         
-        // Get correct field names from your API
+        // Get correct field names from the SPEC
         const authorId = author.id || '';
-        const displayName = author.display_name || author.displayName || 'Unknown';
-        const username = author.username || displayName.toLowerCase().replace(/\s+/g, '_');
-        const profileImage = author.profile_image || author.profileImage || '';
+        const displayName = author.displayName || 'Unknown';  // ← Only displayName exists in spec
+        const profileImage = author.profileImage || '';
         
         // Badge styling - make it inline and not cramped
         const badge = isRemote ? 
@@ -84,7 +83,6 @@ function renderAuthors(authors) {
                 }
                 <div class="author-text">
                     <h3>${displayName}</h3>
-                    <p>@${username}</p>
                 </div>
                 ${badge}
             </div>

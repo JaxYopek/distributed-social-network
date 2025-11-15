@@ -92,36 +92,52 @@ def profile_edit(request, author_id):
 @login_required
 def stream(request):
     """
-    Show the main feed for the logged-in author.
-    Displays publuc posts and user's own posts.    
+    Show the user's stream with:
+    - ALL public entries (from anyone, local or remote)
+    - Unlisted entries from authors I follow
+    - Friends-only entries from my friends
+    - My own entries (all visibilities except deleted)
     """
-    author = request.user 
-
-    # Get candidate entries: all public, friends, unlisted, or own
-    following_authors = author.follow_requests_sent.filter(
+    current_user = request.user
+    
+    # Get all authors the current user is following (approved follows)
+    following = FollowRequest.objects.filter(
+        follower=current_user,
         status=FollowRequestStatus.APPROVED
-    ).values_list("followee", flat=True)
-
-    candidate_entries = Entry.objects.filter(
-        Q(visibility=Visibility.PUBLIC) |
-        Q(author=author) |
-        Q(visibility=Visibility.FRIENDS, author__in=following_authors) |
-        Q(visibility=Visibility.UNLISTED, author__in=following_authors)
-    ).select_related("author").order_by("-published")
-
-
-    # Filter using can_view
-    entries = [entry for entry in candidate_entries if entry.can_view(author)]
-
+    ).values_list('followee', flat=True)
+    
+    # Get all authors who follow the current user back (friends)
+    followers = FollowRequest.objects.filter(
+        followee=current_user,
+        status=FollowRequestStatus.APPROVED
+    ).values_list('follower', flat=True)
+    
+    # Friends are mutual follows
+    friends = set(following) & set(followers)
+    
+    # Build the query
+    entries = Entry.objects.select_related('author').filter(
+        Q(visibility=Visibility.PUBLIC) |  # ALL public entries from ANYONE
+        Q(visibility=Visibility.UNLISTED, author__in=following) |  # Unlisted from followed authors
+        Q(visibility=Visibility.FRIENDS, author__in=friends) |  # Friends-only from friends
+        Q(author=current_user, visibility__in=[Visibility.UNLISTED, Visibility.FRIENDS])  # My unlisted/friends entries
+    ).exclude(
+        visibility=Visibility.DELETED  # Never show deleted entries
+    ).distinct().order_by('-published')
+    
+    # Get pending follow requests count for navbar
+    pending_follow_requests_count = FollowRequest.objects.filter(
+        followee=request.user,
+        status=FollowRequestStatus.PENDING
+    ).count()
+    
     context = {
-        "author": author,
-        "entries": entries,
-        "pending_follow_requests_count": author.follow_requests_received.filter(
-            status=FollowRequestStatus.PENDING
-        ).count(),
+        'entries': entries,
+        'author': current_user,
+        'pending_follow_requests_count': pending_follow_requests_count,
     }
-
-    return render(request, "authors/stream.html", context)
+    
+    return render(request, 'authors/stream.html', context)
 
 # Contains the info for a users profile page
 def profile_detail(request, author_id):

@@ -8,4 +8,5 @@ urlpatterns = [
     path('authors/', AuthorListView.as_view(), name='authors-list'),
     path('authors/explore/', api_views.ExploreAuthorsView.as_view(), name='explore-authors'),
     path('authors/follow/', api_views.api_follow_author, name='api-follow'),
+    
 ]

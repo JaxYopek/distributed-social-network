@@ -48,44 +48,41 @@ class ExploreAuthorsView(APIView):
     def get(self, request):
         from entries.models import RemoteNode
         
+        # Get local authors using existing queryset logic
         local_authors = Author.objects.filter(is_active=True).order_by("id")
         local_serializer = AuthorSerializer(local_authors, many=True, context={'request': request})
         
+        # Get remote authors from all connected nodes
         remote_authors = []
         connected_nodes = RemoteNode.objects.filter(is_active=True)
         
-        for node in connected_nodes:            
+        for node in connected_nodes:
             try:
-                # Check if username/password are actually empty
-                auth = None
-                if node.username and node.password:
-                    auth = HTTPBasicAuth(node.username, node.password)
-                    print(f"   Using auth: YES")
-                else:
-                    print(f"   Using auth: NO")
-                
+                # Use the existing /api/authors/ endpoint on remote nodes
                 response = requests.get(
                     f"{node.base_url.rstrip('/')}/api/authors/",
-                    auth=auth,
+                    auth=HTTPBasicAuth(node.username, node.password) if node.username else None,
                     timeout=5
                 )
                 
                 if response.ok:
                     data = response.json()
+                    # Spec says response should have "authors" key
                     authors = data.get('authors', [])
                     
+                    # Add node info to each author for display
                     for author in authors:
                         author['_node_name'] = node.name
                         author['_is_remote'] = True
+                        # Ensure username exists - extract from displayName if missing
+                        if not author.get('username'):
+                            display_name = author.get('displayName') or author.get('display_name', 'unknown')
+                            author['username'] = display_name.lower().replace(' ', '_')
                     
                     remote_authors.extend(authors)
-                else:
-                    print(f"   ❌ Response not OK: {response.text}")
-                    
             except Exception as e:
-                print(f"   ❌ Exception: {type(e).__name__}: {str(e)}")
-                import traceback
-                traceback.print_exc()
+                # Log but don't fail if one node is down
+                print(f"Error fetching from {node.name}: {str(e)}")
                 continue
         
         return Response({
