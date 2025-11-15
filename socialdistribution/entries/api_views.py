@@ -816,11 +816,28 @@ class InboxView(APIView):
                 status=status.HTTP_400_BAD_REQUEST
             )
         
-        # Get or create the remote author
+        # Extract UUID from the URL ** For now...spec requires full URL, but we only want the UUID **
+        try:
+            # Extract the last part of the URL which should be the UUID
+            uuid_str = remote_author_id.split('/')[-1]
+            
+            # Validate it's actually a UUID
+            import uuid as uuid_module
+            uuid_module.UUID(uuid_str)  # Raises ValueError if invalid
+            
+            # Use just the UUID for the database
+            author_id_for_db = uuid_str
+        except (ValueError, IndexError, AttributeError):
+            return Response(
+                {'detail': f'Could not extract valid UUID from author ID: {remote_author_id}'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        # Get or create the remote author using the UUID
         remote_author, _ = Author.objects.get_or_create(
-            id=remote_author_id,
+            id=author_id_for_db,  # Use extracted UUID
             defaults={
-                'username': actor_data.get('displayName', 'unknown').replace(' ', '_').lower(),
+                'username': actor_data.get('displayName', 'unknown').replace(' ', '_').lower()[:150],
                 'display_name': actor_data.get('displayName', 'Unknown'),
                 'github': actor_data.get('github', ''),
                 'profile_image': actor_data.get('profileImage', ''),

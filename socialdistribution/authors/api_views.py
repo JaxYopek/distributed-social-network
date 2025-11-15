@@ -156,78 +156,17 @@ def api_follow_author(request):
                 {'detail': 'Author not found'},
                 status=status.HTTP_404_NOT_FOUND
             )
-@api_view(['POST'])
-@drf_permission_classes([permissions.IsAuthenticated])
-def api_follow_author(request):
-    """
-    POST /api/authors/follow/
-    API endpoint for following local or remote authors
-    Body: { "author_id": "full URL of author to follow" }
-    """
-    target_author_url = request.data.get('author_id', '').rstrip('/')
-    
-    if not target_author_url:
-        return Response(
-            {'detail': 'author_id is required'},
-            status=status.HTTP_400_BAD_REQUEST
-        )
-    
-    # Check if it's a local follow (just the UUID) or remote (full URL)
-    current_host = request.build_absolute_uri('/').rstrip('/')
-    
-    # Handle if they sent just a UUID (from your existing UI)
-    if not target_author_url.startswith('http'):
-        # Local author by UUID
-        try:
-            target_author = Author.objects.get(id=target_author_url)
-            
-            follow_req, created = FollowRequest.objects.get_or_create(
-                follower=request.user,
-                followee=target_author,
-                defaults={'status': FollowRequestStatus.PENDING}
-            )
-            
-            return Response({
-                'detail': 'Follow request sent',
-                'created': created
-            }, status=status.HTTP_201_CREATED if created else status.HTTP_200_OK)
-        
-        except Author.DoesNotExist:
-            return Response(
-                {'detail': 'Author not found'},
-                status=status.HTTP_404_NOT_FOUND
-            )
-    
-    # It's a full URL - check if local or remote
-    if target_author_url.startswith(current_host):
-        # LOCAL but with full URL
-        try:
-            target_author_id = target_author_url.split('/')[-1]
-            target_author = Author.objects.get(id=target_author_id)
-            
-            follow_req, created = FollowRequest.objects.get_or_create(
-                follower=request.user,
-                followee=target_author,
-                defaults={'status': FollowRequestStatus.PENDING}
-            )
-            
-            return Response({
-                'detail': 'Follow request sent (local)',
-                'created': created
-            }, status=status.HTTP_201_CREATED if created else status.HTTP_200_OK)
-        
-        except Author.DoesNotExist:
-            return Response(
-                {'detail': 'Author not found'},
-                status=status.HTTP_404_NOT_FOUND
-            )
     
     else:
         # REMOTE AUTHOR - send to their inbox
         from entries.models import RemoteNode
         
+        print(f"🎯 Target author URL: {target_author_url}")
+        
         # Build current user's author URL manually (avoid reverse() issues)
         current_user_url = request.build_absolute_uri(f'/api/authors/{request.user.id}/')
+        
+        print(f"👤 Current user URL: {current_user_url}")
         
         actor_data = {
             'type': 'author',
@@ -251,26 +190,40 @@ def api_follow_author(request):
         # Find the remote node
         inbox_url = f"{target_author_url}/inbox/"
         
+        print(f"📬 Inbox URL: {inbox_url}")
+        
         remote_node = None
         for node in RemoteNode.objects.filter(is_active=True):
+            print(f"🔍 Checking node: {node.name} - {node.base_url}")
             if target_author_url.startswith(node.base_url.rstrip('/')):
                 remote_node = node
+                print(f"✅ Matched node: {node.name}")
                 break
         
         if not remote_node:
+            print(f"❌ No remote node matched")
             return Response(
                 {'detail': 'Remote node not configured'},
                 status=status.HTTP_400_BAD_REQUEST
             )
         
+        print(f"📤 Sending follow request to {inbox_url}")
+        print(f"📦 Data: {follow_request_data}")
+        
         try:
             # Send to remote inbox
+            auth = HTTPBasicAuth(remote_node.username, remote_node.password) if remote_node.username else None
+            print(f"🔐 Using auth: {bool(auth)}")
+            
             response = requests.post(
                 inbox_url,
                 json=follow_request_data,
-                auth=HTTPBasicAuth(remote_node.username, remote_node.password) if remote_node.username else None,
+                auth=auth,
                 timeout=10
             )
+            
+            print(f"📥 Response status: {response.status_code}")
+            print(f"📥 Response text: {response.text[:500]}")
             
             if response.ok:
                 # Store locally
@@ -301,6 +254,9 @@ def api_follow_author(request):
                 }, status=status.HTTP_502_BAD_GATEWAY)
         
         except requests.exceptions.RequestException as e:
+            print(f"❌ Exception: {str(e)}")
+            import traceback
+            traceback.print_exc()
             return Response({
                 'detail': f'Connection error: {str(e)}'
             }, status=status.HTTP_503_SERVICE_UNAVAILABLE)
