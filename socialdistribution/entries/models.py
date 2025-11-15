@@ -159,8 +159,8 @@ class RemoteNode(models.Model):
     """Stores credentials for connecting to other team's nodes"""
     name = models.CharField(max_length=100, unique=True)  # "Team Blue"
     base_url = models.URLField(help_text="e.g., https://team-blue.herokuapp.com")
-    username = models.CharField(max_length=100, help_text="Username they gave us")
-    password = models.CharField(max_length=100, help_text="Password they gave us")
+    username = models.CharField(max_length=100, blank=True, default='', help_text="Username they gave us")
+    password = models.CharField(max_length=100, blank=True, default='', help_text="Password they gave us")
     is_active = models.BooleanField(default=True)
     created_at = models.DateTimeField(auto_now_add=True)
     

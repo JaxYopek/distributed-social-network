@@ -48,37 +48,44 @@ class ExploreAuthorsView(APIView):
     def get(self, request):
         from entries.models import RemoteNode
         
-        # Get local authors using existing queryset logic
         local_authors = Author.objects.filter(is_active=True).order_by("id")
         local_serializer = AuthorSerializer(local_authors, many=True, context={'request': request})
         
-        # Get remote authors from all connected nodes
         remote_authors = []
         connected_nodes = RemoteNode.objects.filter(is_active=True)
         
-        for node in connected_nodes:
+        for node in connected_nodes:            
             try:
-                # Use the existing /api/authors/ endpoint on remote nodes
+                # Check if username/password are actually empty
+                auth = None
+                if node.username and node.password:
+                    auth = HTTPBasicAuth(node.username, node.password)
+                    print(f"   Using auth: YES")
+                else:
+                    print(f"   Using auth: NO")
+                
                 response = requests.get(
                     f"{node.base_url.rstrip('/')}/api/authors/",
-                    auth=HTTPBasicAuth(node.username, node.password),
+                    auth=auth,
                     timeout=5
                 )
                 
                 if response.ok:
                     data = response.json()
-                    # Spec says response should have "authors" key
                     authors = data.get('authors', [])
                     
-                    # Add node info to each author for display
                     for author in authors:
                         author['_node_name'] = node.name
                         author['_is_remote'] = True
                     
                     remote_authors.extend(authors)
+                else:
+                    print(f"   ❌ Response not OK: {response.text}")
+                    
             except Exception as e:
-                # Log but don't fail if one node is down
-                print(f"Error fetching from {node.name}: {str(e)}")
+                print(f"   ❌ Exception: {type(e).__name__}: {str(e)}")
+                import traceback
+                traceback.print_exc()
                 continue
         
         return Response({
@@ -152,15 +159,78 @@ def api_follow_author(request):
                 {'detail': 'Author not found'},
                 status=status.HTTP_404_NOT_FOUND
             )
+@api_view(['POST'])
+@drf_permission_classes([permissions.IsAuthenticated])
+def api_follow_author(request):
+    """
+    POST /api/authors/follow/
+    API endpoint for following local or remote authors
+    Body: { "author_id": "full URL of author to follow" }
+    """
+    target_author_url = request.data.get('author_id', '').rstrip('/')
+    
+    if not target_author_url:
+        return Response(
+            {'detail': 'author_id is required'},
+            status=status.HTTP_400_BAD_REQUEST
+        )
+    
+    # Check if it's a local follow (just the UUID) or remote (full URL)
+    current_host = request.build_absolute_uri('/').rstrip('/')
+    
+    # Handle if they sent just a UUID (from your existing UI)
+    if not target_author_url.startswith('http'):
+        # Local author by UUID
+        try:
+            target_author = Author.objects.get(id=target_author_url)
+            
+            follow_req, created = FollowRequest.objects.get_or_create(
+                follower=request.user,
+                followee=target_author,
+                defaults={'status': FollowRequestStatus.PENDING}
+            )
+            
+            return Response({
+                'detail': 'Follow request sent',
+                'created': created
+            }, status=status.HTTP_201_CREATED if created else status.HTTP_200_OK)
+        
+        except Author.DoesNotExist:
+            return Response(
+                {'detail': 'Author not found'},
+                status=status.HTTP_404_NOT_FOUND
+            )
+    
+    # It's a full URL - check if local or remote
+    if target_author_url.startswith(current_host):
+        # LOCAL but with full URL
+        try:
+            target_author_id = target_author_url.split('/')[-1]
+            target_author = Author.objects.get(id=target_author_id)
+            
+            follow_req, created = FollowRequest.objects.get_or_create(
+                follower=request.user,
+                followee=target_author,
+                defaults={'status': FollowRequestStatus.PENDING}
+            )
+            
+            return Response({
+                'detail': 'Follow request sent (local)',
+                'created': created
+            }, status=status.HTTP_201_CREATED if created else status.HTTP_200_OK)
+        
+        except Author.DoesNotExist:
+            return Response(
+                {'detail': 'Author not found'},
+                status=status.HTTP_404_NOT_FOUND
+            )
     
     else:
         # REMOTE AUTHOR - send to their inbox
         from entries.models import RemoteNode
         
-        # Build current user's author object for the follow request
-        current_user_url = request.build_absolute_uri(
-            reverse('api:author-detail', args=[request.user.id])
-        )
+        # Build current user's author URL manually (avoid reverse() issues)
+        current_user_url = request.build_absolute_uri(f'/api/authors/{request.user.id}/')
         
         actor_data = {
             'type': 'author',
@@ -201,7 +271,7 @@ def api_follow_author(request):
             response = requests.post(
                 inbox_url,
                 json=follow_request_data,
-                auth=HTTPBasicAuth(remote_node.username, remote_node.password),
+                auth=HTTPBasicAuth(remote_node.username, remote_node.password) if remote_node.username else None,
                 timeout=10
             )
             
@@ -229,7 +299,8 @@ def api_follow_author(request):
             else:
                 return Response({
                     'detail': 'Failed to send to remote node',
-                    'remote_status': response.status_code
+                    'remote_status': response.status_code,
+                    'remote_response': response.text[:200]
                 }, status=status.HTTP_502_BAD_GATEWAY)
         
         except requests.exceptions.RequestException as e:

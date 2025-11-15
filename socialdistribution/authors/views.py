@@ -39,7 +39,7 @@ def signup(request):
             username=username,
             email=email,
             password=password,
-            display_name=display_name or username,
+            display_name=(display_name or '').strip() or username,
             is_approved=False  # Requires admin approval
         )
         

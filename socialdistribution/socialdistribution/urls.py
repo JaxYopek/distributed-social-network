@@ -52,8 +52,6 @@ urlpatterns = [
         SpectacularRedocView.as_view(url_name='schema', permission_classes=[AllowAny]),
         name='redoc',
     ),
-
-    path('authors/<uuid:author_id>/inbox/', InboxView.as_view(), name='author-inbox'),
 ]
 
 if settings.DEBUG:
