@@ -276,3 +276,4 @@ dist
 # Ignore local uploads
 /media/
 uploads/
+staticfiles/

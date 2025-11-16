@@ -10,8 +10,9 @@ For the full list of settings and their values, see
 https://docs.djangoproject.com/en/5.2/ref/settings/
 """
 
-from pathlib import Path
 import os
+from pathlib import Path
+import dj_database_url
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 
@@ -19,8 +20,7 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 SECRET_KEY = 'django-insecure-^0bws-#z@jo5(653=2axk0r+6@42%9$#%4s$gse^g+!+2xqkcx'
 
 # SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = True
-
+DEBUG = os.getenv("DEBUG", "1") == "1"
 ALLOWED_HOSTS = ["*"]
 
 # Application definition
@@ -46,8 +46,8 @@ INSTALLED_APPS = [
 
 MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware',
-    'django.contrib.sessions.middleware.SessionMiddleware',
     'whitenoise.middleware.WhiteNoiseMiddleware',
+    'django.contrib.sessions.middleware.SessionMiddleware',
     'django.middleware.common.CommonMiddleware',
     'django.middleware.csrf.CsrfViewMiddleware',
     'django.contrib.auth.middleware.AuthenticationMiddleware',
@@ -73,8 +73,6 @@ TEMPLATES = [
 ]
 
 WSGI_APPLICATION = 'socialdistribution.wsgi.application'
-
-import dj_database_url
 
 if os.environ.get("DATABASE_URL") is not None:
     # Running on Heroku / with a real DATABASE_URL
@@ -159,3 +157,9 @@ CRONJOBS = [
 ]
 
 SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
+
+# Allowed hosts and CSRF trusted origins from environment dynamically
+_APP_DOMAINS = [h.strip() for h in os.getenv("APP_DOMAINS", "").split(",") if h.strip()]
+if _APP_DOMAINS:
+    ALLOWED_HOSTS = _APP_DOMAINS
+CSRF_TRUSTED_ORIGINS = [f"https://{h}" for h in _APP_DOMAINS]
