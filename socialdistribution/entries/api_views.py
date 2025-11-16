@@ -173,47 +173,61 @@ class EntryDetailView(generics.RetrieveUpdateDestroyAPIView):
         serializer = EntrySerializer(entry, context={"request": request})
         return Response(serializer.data)
 
+# entries/api_views.py
+import requests
+from requests.auth import HTTPBasicAuth
+from django.urls import reverse
+from django.utils import timezone
+from authors.models import FollowRequest, FollowRequestStatus, Author
+from entries.models import Entry, Visibility, RemoteNode
+
+
 def send_entry_to_remote_followers(entry: Entry, request):
     """
-    Push a newly created entry to the inbox of all remote followers
+    Push a PUBLIC entry to the inbox of all remote followers
     of the entry's author.
     """
-    # Only send public posts for now 
+    # Only federate PUBLIC posts
     if entry.visibility != Visibility.PUBLIC:
+        print(f"[send_entry_to_remote_followers] Not sending entry {entry.id}: visibility={entry.visibility}")
         return
 
     author = entry.author
     current_host = request.build_absolute_uri('/').rstrip('/')
 
-    # Followers who see this author’s posts
-    followers = FollowRequest.objects.filter(
+    # Followers on THIS node (DB)
+    followers_qs = FollowRequest.objects.filter(
         followee=author,
         status=FollowRequestStatus.APPROVED,
     ).select_related('follower')
 
-    # URL of this entry on this node
+    print(f"[send_entry_to_remote_followers] author={author.id} host={current_host} followers={followers_qs.count()}")
+
+    # URLs for this entry/author as seen from THIS node
     entry_api_url = request.build_absolute_uri(
         reverse("api:entry-detail", args=[entry.id])
     )
-
-    # Author URL on this node
     author_api_url = request.build_absolute_uri(f"/api/authors/{author.id}/")
 
-    for fr in followers:
+    for fr in followers_qs:
         follower: Author = fr.follower
 
-        # Safe host extraction: handle None
+        # Safe host extraction
         host_value = getattr(follower, "host", "") or ""
-        follower_host = host_value.rstrip("/")
+        follower_host = host_value.rstrip('/')
 
-        # Only send to remote followers (host set and not this node)
+        print(f"[send_entry_to_remote_followers] follower={follower.id} host={follower_host!r}")
+
+        # Skip local followers (no host or same host as current node)
         if not follower_host or follower_host == current_host:
-            # local follower or missing host → skip
+            print(f"[send_entry_to_remote_followers] -> skip follower={follower.id} (local or missing host)")
             continue
+
+        # Build follower's author URL on THEIR node
         follower_author_url = f"{follower_host}/api/authors/{follower.id}"
         inbox_url = f"{follower_author_url}/inbox/"
 
-        # Find RemoteNode config matching that host
+        # Match RemoteNode config
         remote_node = (
             RemoteNode.objects
             .filter(is_active=True)
@@ -221,7 +235,11 @@ def send_entry_to_remote_followers(entry: Entry, request):
             .first()
         )
 
-        auth = HTTPBasicAuth(remote_node.username, remote_node.password) if remote_node and remote_node.username else None
+        if not remote_node:
+            print(f"[send_entry_to_remote_followers] -> no RemoteNode for host={follower_host}")
+            continue
+
+        auth = HTTPBasicAuth(remote_node.username, remote_node.password) if remote_node.username else None
 
         payload = {
             "type": "entry",
@@ -232,24 +250,26 @@ def send_entry_to_remote_followers(entry: Entry, request):
             "contentType": entry.content_type,
             "content": entry.content,
             "description": entry.description,
-            "visibility": entry.visibility.name,  # "PUBLIC", etc.
-            "published": entry.published.isoformat(),
+            "visibility": entry.visibility.name,  # "PUBLIC"
+            "published": (entry.published or timezone.now()).isoformat(),
             "author": {
                 "type": "author",
                 "id": author_api_url,
                 "displayName": getattr(author, "display_name", None) or getattr(author, "username", ""),
-                "github": getattr(author, "github", ""),
-                "profileImage": getattr(author, "profile_image", ""),
+                "github": getattr(author, "github", "") or "",
+                "profileImage": getattr(author, "profile_image", "") or "",
                 "host": request.build_absolute_uri('/api/'),
             },
         }
 
         try:
-            requests.post(inbox_url, json=payload, auth=auth, timeout=5)
+            print(f"[send_entry_to_remote_followers] POST -> {inbox_url}")
+            resp = requests.post(inbox_url, json=payload, auth=auth, timeout=10)
+            print(f"[send_entry_to_remote_followers] <- {resp.status_code} {resp.text[:200]}")
         except requests.RequestException as e:
-            # log and continue, don't break sending to others
-            print(f"Error sending entry to follower inbox {inbox_url}: {e}")
- 
+            print(f"[send_entry_to_remote_followers] ERROR sending to {inbox_url}: {e}")
+            continue
+
 
 
 class MyEntriesListView(generics.ListCreateAPIView):
