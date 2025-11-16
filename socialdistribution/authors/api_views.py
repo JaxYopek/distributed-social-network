@@ -22,17 +22,20 @@ class AuthorDetailView(generics.RetrieveAPIView):
 class AuthorListView(generics.ListAPIView):
     """
     GET /api/authors/
-    Returns a list of all authors (public accounts).
+    Returns a list of approved public authors.
     """
-    queryset = Author.objects.all().order_by("id") 
     serializer_class = AuthorSerializer 
     permission_classes = [permissions.AllowAny]
-    
+
+    def get_queryset(self):
+        return Author.objects.filter(
+            is_active=True,
+            is_approved=True,
+        ).order_by("id")
+
     def list(self, request, *args, **kwargs):
         queryset = self.get_queryset()
         serializer = self.get_serializer(queryset, many=True)
-        
-        # Return in spec format with "authors" key
         return Response({
             "type": "authors",
             "authors": serializer.data
@@ -49,7 +52,10 @@ class ExploreAuthorsView(APIView):
         from entries.models import RemoteNode
         
         # Get local authors using existing queryset logic
-        local_authors = Author.objects.filter(is_active=True).order_by("id")
+        local_authors = Author.objects.filter(
+            is_active=True,
+            is_approved=True,
+        ).exclude(id=request.user.id).order_by("id")
         local_serializer = AuthorSerializer(local_authors, many=True, context={'request': request})
         
         # Get remote authors from all connected nodes
