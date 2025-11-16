@@ -13,6 +13,7 @@ import uuid
 import base64
 from django.conf import settings
 from django.urls import reverse
+from .api_views import send_entry_to_remote_followers
 
 
 class PublicEntriesListView(ListView):
@@ -57,6 +58,9 @@ def create_entry(request):
                 content_type=content_type,
                 visibility=form.cleaned_data['visibility']
             )
+
+            send_entry_to_remote_followers(entry, request)
+
             messages.success(request, 'Entry created successfully!')
             return redirect('entries:view_entry', entry_id=entry.id)
         else:
@@ -107,6 +111,8 @@ def edit_entry(request, entry_id):
             entry.visibility = form.cleaned_data['visibility']
             entry.save()
 
+            send_entry_to_remote_followers(entry, request)
+            
             messages.success(request, 'Entry updated successfully!')
             return redirect('entries:view_entry', entry_id=entry.id)
         else:
