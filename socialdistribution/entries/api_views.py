@@ -187,7 +187,7 @@ def send_entry_to_remote_followers(entry: Entry, request):
     Push a PUBLIC entry to the inbox of all remote followers
     of the entry's author.
     """
-    # Only federate PUBLIC posts
+    # Only federate PUBLIC posts (for now?)
     if entry.visibility != Visibility.PUBLIC:
         print(f"[send_entry_to_remote_followers] Not sending entry {entry.id}: visibility={entry.visibility}")
         return
@@ -250,7 +250,7 @@ def send_entry_to_remote_followers(entry: Entry, request):
             "contentType": entry.content_type,
             "content": entry.content,
             "description": entry.description,
-            "visibility": entry.visibility.name,  # "PUBLIC"
+            "visibility": entry.visibility,
             "published": (entry.published or timezone.now()).isoformat(),
             "author": {
                 "type": "author",
@@ -918,9 +918,8 @@ class InboxView(APIView):
             return Response({'detail': 'Entry not found'}, status=status.HTTP_404_NOT_FOUND)
         
         # Extract UUID for comment id 
-        comment_id = comment_full_id  
-        # if remote sends full URL, do the same split/UUID validation here
-        
+        comment_id = comment_full_id         
+         
         comment, created = Comment.objects.update_or_create(
             id=comment_id,
             defaults={
