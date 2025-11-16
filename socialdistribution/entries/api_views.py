@@ -200,14 +200,16 @@ def send_entry_to_remote_followers(entry: Entry, request):
     author_api_url = request.build_absolute_uri(f"/api/authors/{author.id}/")
 
     for fr in followers:
-        follower = fr.follower
+        follower: Author = fr.follower
 
-        # Only send to remote followers (those whose host is not this node)
-        follower_host = getattr(follower, "host", "").rstrip("/")
+        # Safe host extraction: handle None
+        host_value = getattr(follower, "host", "") or ""
+        follower_host = host_value.rstrip("/")
+
+        # Only send to remote followers (host set and not this node)
         if not follower_host or follower_host == current_host:
-            continue  # local follower; no need for backend-to-backend here
-
-        # Remote follower's author URL on their node
+            # local follower or missing host → skip
+            continue
         follower_author_url = f"{follower_host}/api/authors/{follower.id}"
         inbox_url = f"{follower_author_url}/inbox/"
 
@@ -895,8 +897,8 @@ class InboxView(APIView):
         except Entry.DoesNotExist:
             return Response({'detail': 'Entry not found'}, status=status.HTTP_404_NOT_FOUND)
         
-        # Extract UUID for comment id (if you're using UUIDs)
-        comment_id = comment_full_id  # if your Comment.id is UUIDField and remote sends only UUID
+        # Extract UUID for comment id 
+        comment_id = comment_full_id  
         # if remote sends full URL, do the same split/UUID validation here
         
         comment, created = Comment.objects.update_or_create(
@@ -956,8 +958,6 @@ class InboxView(APIView):
                 'host': base_host,   
             }
         )
-
-        # (optional) If author already existed but had no host, you can backfill it:
         if not created and not getattr(remote_author, 'host', None) and base_host:
             remote_author.host = base_host
             remote_author.save(update_fields=['host'])
