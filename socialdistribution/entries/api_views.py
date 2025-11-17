@@ -20,6 +20,8 @@ from django.utils import timezone
 from dateutil import parser as date_parser
 import requests
 from requests.auth import HTTPBasicAuth
+from socialdistribution.authentication import RemoteNodeBasicAuthentication
+from typing import Optional
 
 def resolve_author_or_404(identifier: str) -> Author:
     decoded = unquote(identifier).strip()
@@ -45,6 +47,84 @@ def resolve_author_or_404(identifier: str) -> Author:
             continue
 
     raise Http404("Author not found")
+
+
+def _resolve_remote_author_from_data(author_data: dict) -> Optional[Author]:
+    """
+    Given the 'author' object from a remote payload, return a local Author instance
+    (create a local stub if needed). Returns None on invalid/missing id.
+    This version uses the author's UUID to build a collision-resistant username and
+    handles IntegrityError when creating the local Author.
+    """
+    if not isinstance(author_data, dict):
+        return None
+
+    full_id = (author_data.get("id") or "").rstrip("/")
+    if not full_id:
+        return None
+
+    # extract UUID-like last segment
+    try:
+        import uuid as _uuid
+        uuid_str = full_id.split("/")[-1]
+        _uuid.UUID(uuid_str)
+    except Exception:
+        return None
+
+    display_name = (
+        author_data.get("displayName")
+        or author_data.get("display_name")
+        or author_data.get("username")
+        or f"remote_{uuid_str[:8]}"
+    )
+
+    # Build a collision-resistant username using the uuid
+    username = f"remote_{uuid_str.replace('-', '')[:24]}"
+
+    raw_host = (author_data.get("host") or "").rstrip("/")
+    if raw_host.endswith("/api"):
+        host = raw_host[:-4]
+    else:
+        host = raw_host or None
+
+    # Try to get by id first (preferred). If not present, create safely.
+    try:
+        remote_author = Author.objects.filter(id=uuid_str).first()
+        if remote_author:
+            # Ensure host is set if we have it
+            if host and not getattr(remote_author, "host", None):
+                remote_author.host = host
+                remote_author.save(update_fields=["host"])
+            return remote_author
+
+        # Create with collision-resistant username; catch IntegrityError and retry with suffix
+        from django.db import IntegrityError, transaction
+
+        for attempt in range(3):
+            try:
+                with transaction.atomic():
+                    remote_author = Author.objects.create(
+                        id=uuid_str,
+                        username=username if attempt == 0 else f"{username}_{attempt}",
+                        display_name=display_name,
+                        github=author_data.get("github", "") or "",
+                        profile_image=author_data.get("profileImage", "") or author_data.get(
+                            "profile_image", "") or "",
+                        is_active=False,
+                        host=host,
+                    )
+                return remote_author
+            except IntegrityError:
+                # Username collision — try another suffix
+                continue
+
+        # If still failing, fallback to looking up by username or return None
+        remote_author = Author.objects.filter(
+            username__startswith=f"remote_{uuid_str.replace('-', '')[:16]}").first()
+        return remote_author
+    except Exception:
+        # Keep callers responsible for returning HTTP 400/500; here return None on failure
+        return None
 
 
 LIKE_ID_SEPARATOR = "|"
@@ -709,6 +789,8 @@ class InboxView(APIView):
     POST /api/authors/{AUTHOR_SERIAL}/inbox/
     Receives entries, likes, comments, and follow requests from remote nodes.
     """
+    # enable HTTP Basic auth for remote nodes so request.user.node is populated
+    authentication_classes = [RemoteNodeBasicAuthentication]
     permission_classes = [permissions.AllowAny]  # Auth handled by HTTP Basic Auth
     
     def post(self, request, author_id):
@@ -748,42 +830,11 @@ class InboxView(APIView):
     def _handle_entry(self, recipient: Author, data: dict, request):
         """Handle incoming entry from remote node"""
         author_data = data.get('author', {})
-        remote_author_full_id = author_data.get('id', '').rstrip('/')
-
-        if not remote_author_full_id:
-            return Response({'detail': 'Missing author.id'}, status=status.HTTP_400_BAD_REQUEST)
-
-        # --- extract UUID for remote author ---
-        try:
-            import uuid as uuid_module
-            remote_uuid = remote_author_full_id.split('/')[-1]
-            uuid_module.UUID(remote_uuid)  # validate
-        except (ValueError, IndexError):
-            return Response(
-                {'detail': f'Could not extract valid UUID from author ID: {remote_author_full_id}'},
-                status=status.HTTP_400_BAD_REQUEST
-            )
-
-        raw_host = (author_data.get('host', '') or '').rstrip('/')
-        if raw_host.endswith('/api'):
-            base_host = raw_host[:-4]
-        else:
-            base_host = raw_host
-
-        remote_author, created = Author.objects.get_or_create(
-            id=remote_uuid,
-            defaults={
-                'username': ...,
-                'display_name': ...,
-                'github': ...,
-                'profile_image': ...,
-                'is_active': False,
-                'host': base_host,
-            }
-        )
-
-        # --- extract UUID for entry id ---
-        entry_full_id = data.get('id', '').rstrip('/')
+        remote_author = _resolve_remote_author_from_data(author_data)
+        if not remote_author:
+            return Response({'detail': 'Missing or invalid author.id'}, status=status.HTTP_400_BAD_REQUEST)
+        
+        entry_full_id = (data.get("id", "")).rstrip("/")
         if not entry_full_id:
             return Response({'detail': 'Missing entry id'}, status=status.HTTP_400_BAD_REQUEST)
 
@@ -840,129 +891,81 @@ class InboxView(APIView):
     def _handle_like(self, recipient: Author, data: dict, request):
         """Handle incoming like from remote node"""
         author_data = data.get('author', {})
-        remote_author_full_id = author_data.get('id', '').rstrip('/')
+        remote_author = _resolve_remote_author_from_data(author_data)
         object_url = data.get('object', '').rstrip('/')
         
-        if not remote_author_full_id or not object_url:
+        if not remote_author or not object_url:
             return Response(
                 {'detail': 'Missing author.id or object'},
                 status=status.HTTP_400_BAD_REQUEST
             )
         
-        # --- extract UUID for remote author ---
         try:
-            import uuid as uuid_module
-            remote_author_uuid = remote_author_full_id.split('/')[-1]
-            uuid_module.UUID(remote_author_uuid)
-        except (ValueError, IndexError):
-            return Response(
-                {'detail': f'Could not extract valid UUID from author ID: {remote_author_full_id}'},
-                status=status.HTTP_400_BAD_REQUEST
-            )
-        
-        remote_author, _ = Author.objects.get_or_create(
-            id=remote_author_uuid,
-            defaults={
-                'username': author_data.get('displayName', 'unknown').replace(' ', '_').lower()[:150],
-                'display_name': author_data.get('displayName', 'Unknown'),
-                'is_active': False,
-            }
-        )
-        
-        # Try to extract ID from URL - handle both entry and comment likes
-        try:
-            if '/entries/' in object_url or '/entry/' in object_url:
-                parts = object_url.split('/')
-                entry_id = parts[-1] if parts[-1] else parts[-2]
-                entry = Entry.objects.get(id=entry_id)
+            parts = [p for p in object_url.split("/") if p]
+            target_id = parts[-1]
+            # try entry first
+            try:
+                entry = Entry.objects.get(id=target_id)
                 entry.liked_by.add(remote_author)
-                return Response({'detail': 'Like added to entry'}, status=status.HTTP_200_OK)
-            
-            elif '/comments/' in object_url or '/comment/' in object_url:
-                parts = object_url.split('/')
-                comment_id = parts[-1] if parts[-1] else parts[-2]
-                comment = Comment.objects.get(id=comment_id)
-                comment.liked_by.add(remote_author)
-                return Response({'detail': 'Like added to comment'}, status=status.HTTP_200_OK)
-            
-            else:
-                return Response(
-                    {'detail': 'Could not determine object type from URL'},
-                    status=status.HTTP_400_BAD_REQUEST
-                )
-        
-        except (Entry.DoesNotExist, Comment.DoesNotExist):
-            return Response({'detail': 'Object not found'}, status=status.HTTP_404_NOT_FOUND)
+                return Response({"detail": "Like added to entry"}, status=status.HTTP_200_OK)
+            except Entry.DoesNotExist:
+                # try comment
+                try:
+                    comment = Comment.objects.get(id=target_id)
+                    comment.liked_by.add(remote_author)
+                    return Response({"detail": "Like added to comment"}, status=status.HTTP_200_OK)
+                except Comment.DoesNotExist:
+                    return Response({"detail": "Object not found"}, status=status.HTTP_404_NOT_FOUND)
         except Exception as e:
-            return Response({'detail': f'Error processing like: {str(e)}'},
-                            status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+            return Response({"detail": f"Error processing like: {str(e)}"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
     
     def _handle_comment(self, recipient: Author, data: dict, request):
         """Handle incoming comment from remote node"""
         author_data = data.get('author', {})
-        remote_author_full_id = author_data.get('id', '').rstrip('/')
+        remote_author = _resolve_remote_author_from_data(author_data)
         entry_url = data.get('entry', '').rstrip('/')
         comment_full_id = data.get('id', '').rstrip('/')
         
-        if not remote_author_full_id or not entry_url or not comment_full_id:
+        if not remote_author or not entry_url or not comment_full_id:
             return Response(
                 {'detail': 'Missing required fields'},
                 status=status.HTTP_400_BAD_REQUEST
             )
         
-        # --- extract UUID for remote author ---
         try:
-            import uuid as uuid_module
-            remote_author_uuid = remote_author_full_id.split('/')[-1]
-            uuid_module.UUID(remote_author_uuid)
-        except (ValueError, IndexError):
-            return Response(
-                {'detail': f'Could not extract valid UUID from author ID: {remote_author_full_id}'},
-                status=status.HTTP_400_BAD_REQUEST
-            )
-        
-        remote_author, _ = Author.objects.get_or_create(
-            id=remote_author_uuid,
-            defaults={
-                'username': author_data.get('displayName', 'unknown').replace(' ', '_').lower()[:150],
-                'display_name': author_data.get('displayName', 'Unknown'),
-                'is_active': False,
-            }
-        )
-        
-        # Extract entry ID from URL
-        try:
-            parts = entry_url.split('/')
-            entry_id = parts[-1] if parts[-1] else parts[-2]
+            parts = [p for p in entry_url.split("/") if p]
+            entry_id = parts[-1]
             entry = Entry.objects.get(id=entry_id, author=recipient)
         except Entry.DoesNotExist:
-            return Response({'detail': 'Entry not found'}, status=status.HTTP_404_NOT_FOUND)
-        
-        # Extract UUID for comment id 
-        comment_id = comment_full_id         
-        comment, created = Comment.objects.update_or_create(
-            id=comment_id,
-            defaults={
-                'entry': entry,
-                'author': remote_author,
-                'comment': data.get('comment', ''),
-                'content_type': data.get('contentType', 'text/plain'),
-            }
-        )
-        
-        return Response(
-            {'detail': 'Comment received'},
-            status=status.HTTP_201_CREATED if created else status.HTTP_200_OK
-        )
+            return Response({"detail": "Entry not found"}, status=status.HTTP_404_NOT_FOUND)
+        except Exception as e:
+            return Response({"detail": f"Error locating entry: {str(e)}"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+        comment_id = comment_full_id.split("/")[-1]
+
+        try:
+            comment, created = Comment.objects.update_or_create(
+                id=comment_id,
+                defaults={
+                    "entry": entry,
+                    "author": remote_author,
+                    "content": data.get("comment", ""),
+                    "content_type": data.get("contentType", "text/plain"),
+                },
+            )
+            return Response({"detail": "Comment received"}, status=status.HTTP_201_CREATED if created else status.HTTP_200_OK)
+        except Exception as e:
+            return Response({"detail": f"Error saving comment: {str(e)}"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
     
     def _handle_follow(self, recipient: Author, data: dict, request):
         """Handle incoming follow request from remote node"""
         actor_data = data.get('actor', {})
-        remote_author_id = actor_data.get('id', '').rstrip('/')
+        remote_author = _resolve_remote_author_from_data(actor_data)
         
-        if not remote_author_id:
+        if not remote_author:
             return Response(
-                {'detail': 'Missing actor.id'},
+                {'detail': 'Missing or invalid actor'},
                 status=status.HTTP_400_BAD_REQUEST
             )
         
@@ -1007,8 +1010,6 @@ class InboxView(APIView):
             followee=recipient,
             defaults={'status': FollowRequestStatus.PENDING}
         )
+
+        return Response({"detail": "Follow request received"}, status=status.HTTP_201_CREATED if created else status.HTTP_200_OK)
         
-        return Response(
-            {'detail': 'Follow request received'},
-            status=status.HTTP_201_CREATED if created else status.HTTP_200_OK
-        )
