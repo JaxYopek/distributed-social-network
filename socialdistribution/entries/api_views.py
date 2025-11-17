@@ -173,7 +173,6 @@ class EntryDetailView(generics.RetrieveUpdateDestroyAPIView):
         serializer = EntrySerializer(entry, context={"request": request})
         return Response(serializer.data)
 
-# entries/api_views.py
 import requests
 from requests.auth import HTTPBasicAuth
 from django.urls import reverse
@@ -919,7 +918,6 @@ class InboxView(APIView):
         
         # Extract UUID for comment id 
         comment_id = comment_full_id         
-         
         comment, created = Comment.objects.update_or_create(
             id=comment_id,
             defaults={
