@@ -35,7 +35,7 @@ class AuthorListView(generics.ListAPIView):
     Accessible to both remote nodes and local users
     """
     serializer_class = AuthorSerializer 
-    permission_classes = [permissions.AllowAny]
+    permission_classes = [IsAuthenticatedNodeOrLocalUser]
 
     def get_queryset(self):
         return Author.objects.filter(

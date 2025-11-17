@@ -3,8 +3,9 @@ from django.urls import reverse
 from rest_framework.test import APITestCase
 from rest_framework import status
 from authors.models import Author  
-from entries.models import Entry, Visibility 
+from entries.models import Entry, Visibility, RemoteNode
 import uuid
+import base64
 from unittest.mock import patch
 from entries.github_sync import fetch_github_activity
 
@@ -16,6 +17,7 @@ class AuthorAndEntryURLTests(APITestCase):
         """
         Entry.objects.all().delete()  # Clear all entries
         Author.objects.all().delete()  # Clear all authors
+        
         self.author = Author.objects.create(
             id=uuid.uuid4(),
             username="test_author",
@@ -43,6 +45,16 @@ class AuthorAndEntryURLTests(APITestCase):
             profile_image="https://example.com/author3.png",
             is_approved=True
         )
+        
+        # Create a remote node for testing Basic Auth
+        self.remote_node = RemoteNode.objects.create(
+            name="Test Node",
+            base_url="https://test.example.com/api/",
+            username="test_node",
+            password="test_pass",
+            is_active=True
+        )
+        
         self.entry = Entry.objects.create(
             id=uuid.uuid4(),
             title="Test Entry",
@@ -95,7 +107,12 @@ class AuthorAndEntryURLTests(APITestCase):
             author=self.author3,
             visibility=Visibility.PUBLIC,
         )
-        
+    
+    def get_basic_auth_header(self, username, password):
+        """Helper method to create Basic Auth header"""
+        credentials = f"{username}:{password}"
+        encoded = base64.b64encode(credentials.encode()).decode()
+        return f"Basic {encoded}"
 
     def test_author_url_consistency(self): #Identity 1
         """
@@ -142,7 +159,11 @@ class AuthorAndEntryURLTests(APITestCase):
     def test_author_list(self): #Identity 2
         """
         Test that the API returns a list of all authors hosted on the node.
+        Requires authentication (local user).
         """
+        # Authenticate as a local user before accessing the endpoint
+        self.client.force_authenticate(user=self.author)
+        
         author_list_url = reverse("authors_api:authors-list")
         response = self.client.get(author_list_url)
 
@@ -172,6 +193,29 @@ class AuthorAndEntryURLTests(APITestCase):
                     self.assertEqual(author_data["displayName"], self.author2.display_name)
                     self.assertEqual(author_data["github"], self.author2.github)
                     self.assertEqual(author_data["profileImage"], self.author2.profile_image)
+    
+    def test_author_list_with_node_auth(self):
+        """
+        Test that remote nodes can access author list with HTTP Basic Auth.
+        """
+        auth_header = self.get_basic_auth_header("test_node", "test_pass")
+        
+        author_list_url = reverse("authors_api:authors-list")
+        response = self.client.get(
+            author_list_url,
+            HTTP_AUTHORIZATION=auth_header
+        )
+        
+        # Assert the response status code is 200 OK
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        
+        # Verify response structure matches API spec
+        self.assertIn('type', response.data)
+        self.assertEqual(response.data['type'], 'authors')
+        self.assertIn('authors', response.data)
+        
+        # Verify we get authors back
+        self.assertGreater(len(response.data['authors']), 0)
     
     def test_author_detail(self): #Identity 3
         """
@@ -439,37 +483,3 @@ class AuthorAndEntryURLTests(APITestCase):
 
         # Assert the rendered content includes the correct HTML for the image
         self.assertIn('<img src="https://example.com/image.png" alt="Alt text"', response_data['rendered_content'])
-
-    '''
-    def test_stream_shows_all_public_entries(self):
-        """
-        Test that the stream page shows all public entries from all authors.
-        """
-        # Debugging: Check the visibility of self.entry2 in the database
-        print(f"Database visibility for entry2: {Entry.objects.get(id=self.entry2.id).visibility}")
-
-        # API call to fetch the stream of public entries
-        response = self.client.get('/api/entries/')
-        self.assertEqual(response.status_code, status.HTTP_200_OK)
-
-        # Parse the JSON response
-        response_data = response.json()
-        print(response_data)  # Debugging: Print the full response data
-
-        # Check the visibility of each entry in the response
-        for entry in response_data['results']:
-            print(f"Title: {entry['title']}, Visibility: {entry['visibility']}")
-
-        # Extract the titles of the entries in the stream
-        stream_titles = [entry['title'] for entry in response_data['results']]
-        print("Stream Titles:", stream_titles)  # Debugging: Print the titles in the stream
-
-        # Assert that all public entries are included
-        self.assertIn(self.entry.title, stream_titles)  # Public entry by self.author
-
-        # Assert that non-public entries are excluded
-        self.assertNotIn(self.entry2.title, stream_titles)  # Friends-only entry by self.author
-    
-    '''
-
-    
