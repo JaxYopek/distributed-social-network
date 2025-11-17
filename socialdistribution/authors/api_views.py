@@ -18,8 +18,7 @@ class AuthorDetailView(generics.RetrieveAPIView):
     """
     queryset = Author.objects.all()
     serializer_class = AuthorSerializer
-    # Allow both authenticated nodes and local users to access
-    permission_classes = [IsAuthenticatedNodeOrLocalUser]
+    permission_classes = [permissions.AllowAny]
     
     def retrieve(self, request, *args, **kwargs):
         # Log if accessed by remote node
@@ -36,8 +35,7 @@ class AuthorListView(generics.ListAPIView):
     Accessible to both remote nodes and local users
     """
     serializer_class = AuthorSerializer 
-    # Allow both authenticated nodes and local users to access
-    permission_classes = [IsAuthenticatedNodeOrLocalUser]
+    permission_classes = [permissions.AllowAny]
 
     def get_queryset(self):
         return Author.objects.filter(
@@ -52,9 +50,12 @@ class AuthorListView(generics.ListAPIView):
         
         queryset = self.get_queryset()
         serializer = self.get_serializer(queryset, many=True)
+        results = serializer.data
         return Response({
             "type": "authors",
-            "authors": serializer.data
+            "count": len(results),
+            "results": results,
+            "authors": results,
         })
     
 
