@@ -53,6 +53,8 @@ def _resolve_remote_author_from_data(author_data: dict) -> Optional[Author]:
     """
     Given the 'author' object from a remote payload, return a local Author instance
     (create a local stub if needed). Returns None on invalid/missing id.
+    This version uses the author's UUID to build a collision-resistant username and
+    handles IntegrityError when creating the local Author.
     """
     if not isinstance(author_data, dict):
         return None
@@ -75,31 +77,54 @@ def _resolve_remote_author_from_data(author_data: dict) -> Optional[Author]:
         or author_data.get("username")
         or f"remote_{uuid_str[:8]}"
     )
-    username = display_name.replace(" ", "_").lower()[:150]
+
+    # Build a collision-resistant username using the uuid
+    username = f"remote_{uuid_str.replace('-', '')[:24]}"
 
     raw_host = (author_data.get("host") or "").rstrip("/")
     if raw_host.endswith("/api"):
         host = raw_host[:-4]
     else:
-        host = raw_host
+        host = raw_host or None
 
-    remote_author, created = Author.objects.get_or_create(
-        id=uuid_str,
-        defaults={
-            "username": username,
-            "display_name": display_name,
-            "github": author_data.get("github", ""),
-            "profile_image": author_data.get("profileImage", "") or author_data.get("profile_image", ""),
-            "is_active": False,
-            "host": host or None,
-        },
-    )
+    # Try to get by id first (preferred). If not present, create safely.
+    try:
+        remote_author = Author.objects.filter(id=uuid_str).first()
+        if remote_author:
+            # Ensure host is set if we have it
+            if host and not getattr(remote_author, "host", None):
+                remote_author.host = host
+                remote_author.save(update_fields=["host"])
+            return remote_author
 
-    # ensure host is set when available
-    if not created and host and not getattr(remote_author, "host", None):
-        remote_author.host = host
-        remote_author.save(update_fields=["host"])
-    return remote_author
+        # Create with collision-resistant username; catch IntegrityError and retry with suffix
+        from django.db import IntegrityError, transaction
+
+        for attempt in range(3):
+            try:
+                with transaction.atomic():
+                    remote_author = Author.objects.create(
+                        id=uuid_str,
+                        username=username if attempt == 0 else f"{username}_{attempt}",
+                        display_name=display_name,
+                        github=author_data.get("github", "") or "",
+                        profile_image=author_data.get("profileImage", "") or author_data.get(
+                            "profile_image", "") or "",
+                        is_active=False,
+                        host=host,
+                    )
+                return remote_author
+            except IntegrityError:
+                # Username collision — try another suffix
+                continue
+
+        # If still failing, fallback to looking up by username or return None
+        remote_author = Author.objects.filter(
+            username__startswith=f"remote_{uuid_str.replace('-', '')[:16]}").first()
+        return remote_author
+    except Exception:
+        # Keep callers responsible for returning HTTP 400/500; here return None on failure
+        return None
 
 
 LIKE_ID_SEPARATOR = "|"
@@ -816,7 +841,7 @@ class InboxView(APIView):
         if not remote_author:
             return Response({'detail': 'Missing or invalid author.id'}, status=status.HTTP_400_BAD_REQUEST)
         
-        entry_full_id = (data.get("id"), "").rstrip("/")
+        entry_full_id = (data.get("id", "")).rstrip("/")
         if not entry_full_id:
             return Response({'detail': 'Missing entry id'}, status=status.HTTP_400_BAD_REQUEST)
 
@@ -931,7 +956,7 @@ class InboxView(APIView):
                 defaults={
                     "entry": entry,
                     "author": remote_author,
-                    "comment": data.get("comment", ""),
+                    "content": data.get("comment", ""),
                     "content_type": data.get("contentType", "text/plain"),
                 },
             )
