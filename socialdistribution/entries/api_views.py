@@ -8,13 +8,18 @@ from django.shortcuts import get_object_or_404
 from django.http import Http404
 from django.db.models import Q
 from django.urls import reverse
-from .models import Entry, Visibility, Comment
-from authors.models import FollowRequestStatus, Author
+from .models import Entry, Visibility, Comment, RemoteNode
+from authors.models import FollowRequest, FollowRequestStatus, Author
 from authors.serializers import AuthorSerializer
 from .serializers import EntrySerializer, CommentSerializer
 from django.http import JsonResponse
 import commonmark
-
+from rest_framework.decorators import api_view, permission_classes
+from rest_framework import status
+from django.utils import timezone
+from dateutil import parser as date_parser
+import requests
+from requests.auth import HTTPBasicAuth
 
 def resolve_author_or_404(identifier: str) -> Author:
     decoded = unquote(identifier).strip()
@@ -69,7 +74,10 @@ class LikeSerializerMixin:
         return str(author)
 
     def _serialize_author(self, request, author: Author) -> dict:
-        return AuthorSerializer(author, context={"request": request}).data
+        data = AuthorSerializer(author, context={"request": request}).data
+        data["apiId"] = data.get("id")
+        data["id"] = str(author.id)
+        return data
 
     def _build_entry_like_object(self, request, entry: Entry, liker: Author) -> dict:
         object_url = request.build_absolute_uri(reverse("api:entry-detail", args=[entry.id]))
@@ -165,6 +173,116 @@ class EntryDetailView(generics.RetrieveUpdateDestroyAPIView):
         serializer = EntrySerializer(entry, context={"request": request})
         return Response(serializer.data)
 
+import requests
+from requests.auth import HTTPBasicAuth
+from django.urls import reverse
+from django.utils import timezone
+from authors.models import FollowRequest, FollowRequestStatus, Author
+from entries.models import Entry, Visibility, RemoteNode
+
+
+def send_entry_to_remote_followers(entry: Entry, request):
+    """
+    Send a new/updated entry to remote followers, respecting visibility:
+
+    - PUBLIC  -> all remote followers
+    - UNLISTED -> all remote followers
+    - FRIENDS -> only remote mutual follows (friends)
+    """
+    # Don't federate deleted posts
+    if entry.visibility == Visibility.DELETED:
+        return
+
+    author = entry.author
+    current_host = request.build_absolute_uri('/').rstrip('/')
+
+    # All APPROVED followers of this author (local + remote)
+    followers_qs = FollowRequest.objects.filter(
+        followee=author,
+        status=FollowRequestStatus.APPROVED,
+    ).select_related('follower')
+
+    # All authors this author is following (for mutual friend check)
+    following_ids = set(
+        FollowRequest.objects.filter(
+            follower=author,
+            status=FollowRequestStatus.APPROVED,
+        ).values_list('followee_id', flat=True)
+    )
+
+    print(f"[send_entry_to_remote_followers] author={author.id} vis={entry.visibility} followers={followers_qs.count()}")
+
+    entry_api_url = request.build_absolute_uri(
+        reverse("api:entry-detail", args=[entry.id])
+    )
+    author_api_url = request.build_absolute_uri(f"/api/authors/{author.id}/")
+
+    for fr in followers_qs:
+        follower: Author = fr.follower
+
+        # Determine if this follower is a "friend" (mutual follow)
+        is_friend = follower.id in following_ids
+
+        # Visibility-based filtering:
+        if entry.visibility == Visibility.FRIENDS and not is_friend:
+            # friends-only: skip non-mutuals
+            print(f"[send_entry_to_remote_followers] skip {follower.id}: not a friend")
+            continue
+        # For PUBLIC and UNLISTED: any follower is OK, nothing extra to check
+
+        host_value = getattr(follower, "host", "") or ""
+        follower_host = host_value.rstrip('/')
+
+        # Only send to remote followers (host set and not this node)
+        if not follower_host or follower_host == current_host:
+            print(f"[send_entry_to_remote_followers] skip {follower.id}: local or missing host")
+            continue
+
+        follower_author_url = f"{follower_host}/api/authors/{follower.id}"
+        inbox_url = f"{follower_author_url}/inbox/"
+
+        remote_node = (
+            RemoteNode.objects
+            .filter(is_active=True)
+            .filter(base_url__startswith=follower_host)
+            .first()
+        )
+
+        if not remote_node:
+            print(f"[send_entry_to_remote_followers] no RemoteNode for host={follower_host}")
+            continue
+
+        auth = HTTPBasicAuth(remote_node.username, remote_node.password) if remote_node.username else None
+
+        payload = {
+            "type": "entry",
+            "id": entry_api_url,
+            "title": entry.title,
+            "source": entry_api_url,
+            "origin": entry_api_url,
+            "contentType": entry.content_type,
+            "content": entry.content,
+            "description": entry.description,
+            "visibility": (entry.visibility or "").upper(),
+            "published": (entry.published or timezone.now()).isoformat(),
+            "author": {
+                "type": "author",
+                "id": author_api_url,
+                "displayName": getattr(author, "display_name", None) or getattr(author, "username", ""),
+                "github": getattr(author, "github", "") or "",
+                "profileImage": getattr(author, "profile_image", "") or "",
+                "host": request.build_absolute_uri('/api/'),
+            },
+        }
+
+        try:
+            print(f"[send_entry_to_remote_followers] POST -> {inbox_url}")
+            resp = requests.post(inbox_url, json=payload, auth=auth, timeout=10)
+            print(f"[send_entry_to_remote_followers] <- {resp.status_code} {resp.text[:200]}")
+        except requests.RequestException as e:
+            print(f"[send_entry_to_remote_followers] ERROR sending to {inbox_url}: {e}")
+            continue
+
 
 class MyEntriesListView(generics.ListCreateAPIView):
     """
@@ -183,6 +301,8 @@ class MyEntriesListView(generics.ListCreateAPIView):
 
     def perform_create(self, serializer):
         serializer.save(author=self.request.user)
+        entry = serializer.save(author=self.request.user)
+        send_entry_to_remote_followers(entry, self.request)
 
     def list(self, request, *args, **kwargs):
         queryset = self.get_queryset()
@@ -207,6 +327,60 @@ class EntryEditDeleteView(generics.RetrieveUpdateDestroyAPIView):
 
         return entry
 
+    def perform_update(self, serializer):
+        entry = serializer.save()
+        send_entry_to_remote_followers(entry, self.request)
+
+    def perform_destroy(self, instance):
+        instance.visibility = "DELETED"
+        instance.save(update_fields=["visibility"])
+        send_entry_to_remote_followers(instance, self.request)
+
+class EntryLikeView(APIView):
+    """
+    POST /api/entries/<uuid:entry_id>/like/
+    """
+    permission_classes = [permissions.IsAuthenticated]
+
+    def post(self, request, entry_id):
+        entry = get_object_or_404(
+            Entry.objects.select_related("author"),
+            id=entry_id,
+        )
+
+        if entry.visibility == Visibility.DELETED:
+            raise Http404("Entry not found")
+
+        if not entry.can_view(request.user):
+            if entry.visibility == Visibility.FRIENDS:
+                return Response(
+                    {"detail": "Not friends with the author."},
+                    status=status.HTTP_403_FORBIDDEN,
+                )
+            raise Http404("Entry not found")
+
+        if entry.visibility == Visibility.FRIENDS and request.user != entry.author:
+            is_mutual = FollowRequest.objects.filter(
+                follower=request.user,
+                followee=entry.author,
+                status=FollowRequestStatus.APPROVED,
+            ).exists() and FollowRequest.objects.filter(
+                follower=entry.author,
+                followee=request.user,
+                status=FollowRequestStatus.APPROVED,
+            ).exists()
+            if not is_mutual:
+                return Response(
+                    {"detail": "Mutual follow required."},
+                    status=status.HTTP_403_FORBIDDEN,
+                )
+
+        entry.liked_by.add(request.user)
+        likes_count = entry.liked_by.count()
+        return Response(
+            {"type": "Like", "likes": likes_count},
+            status=status.HTTP_200_OK,
+        )
 
 class EntryLikesListView(LikeSerializerMixin, APIView):
     """
@@ -242,6 +416,7 @@ class EntryLikesListView(LikeSerializerMixin, APIView):
                 "page_number": page,
                 "size": size,
                 "count": count,
+                "items": src,
                 "src": src,
             }
         )
@@ -528,3 +703,312 @@ def render_markdown_entry(request, entry_id):
 
     # Return the rendered content as JSON
     return JsonResponse({"rendered_content": rendered_content})
+
+class InboxView(APIView):
+    """
+    POST /api/authors/{AUTHOR_SERIAL}/inbox/
+    Receives entries, likes, comments, and follow requests from remote nodes.
+    """
+    permission_classes = [permissions.AllowAny]  # Auth handled by HTTP Basic Auth
+    
+    def post(self, request, author_id):
+        # Get the target author (the one receiving in their inbox)
+        try:
+            recipient = Author.objects.get(id=author_id)
+        except Author.DoesNotExist:
+            return Response(
+                {'detail': 'Author not found'},
+                status=status.HTTP_404_NOT_FOUND
+            )
+        
+        data = request.data
+        object_type = data.get('type', '').lower()
+        
+        try:
+            if object_type == 'entry':
+                return self._handle_entry(recipient, data, request)
+            elif object_type == 'like':
+                return self._handle_like(recipient, data, request)
+            elif object_type == 'comment':
+                return self._handle_comment(recipient, data, request)
+            elif object_type == 'follow':
+                return self._handle_follow(recipient, data, request)
+            else:
+                return Response(
+                    {'detail': f'Unsupported type: {object_type}'},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+        except Exception as e:
+            # Helpful for debugging
+            return Response(
+                {'detail': f'Error processing {object_type}: {str(e)}'},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+    
+    def _handle_entry(self, recipient: Author, data: dict, request):
+        """Handle incoming entry from remote node"""
+        author_data = data.get('author', {})
+        remote_author_full_id = author_data.get('id', '').rstrip('/')
+
+        if not remote_author_full_id:
+            return Response({'detail': 'Missing author.id'}, status=status.HTTP_400_BAD_REQUEST)
+
+        # --- extract UUID for remote author ---
+        try:
+            import uuid as uuid_module
+            remote_uuid = remote_author_full_id.split('/')[-1]
+            uuid_module.UUID(remote_uuid)  # validate
+        except (ValueError, IndexError):
+            return Response(
+                {'detail': f'Could not extract valid UUID from author ID: {remote_author_full_id}'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        raw_host = (author_data.get('host', '') or '').rstrip('/')
+        if raw_host.endswith('/api'):
+            base_host = raw_host[:-4]
+        else:
+            base_host = raw_host
+
+        remote_author, created = Author.objects.get_or_create(
+            id=remote_uuid,
+            defaults={
+                'username': ...,
+                'display_name': ...,
+                'github': ...,
+                'profile_image': ...,
+                'is_active': False,
+                'host': base_host,
+            }
+        )
+
+        # --- extract UUID for entry id ---
+        entry_full_id = data.get('id', '').rstrip('/')
+        if not entry_full_id:
+            return Response({'detail': 'Missing entry id'}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            import uuid as uuid_module
+            entry_uuid = entry_full_id.split('/')[-1]
+            uuid_module.UUID(entry_uuid)  # validate
+        except (ValueError, IndexError):
+            return Response(
+                {'detail': f'Could not extract valid UUID from entry ID: {entry_full_id}'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        # Parse published date
+        published = data.get('published')
+        if published:
+            try:
+                published = date_parser.parse(published)
+            except Exception:
+                published = timezone.now()
+        else:
+            published = timezone.now()
+        
+        # Map visibility
+        visibility_map = {
+            'PUBLIC': Visibility.PUBLIC,
+            'FRIENDS': Visibility.FRIENDS,
+            'UNLISTED': Visibility.UNLISTED,
+            'DELETED': Visibility.DELETED,
+        }
+        visibility = visibility_map.get(
+            data.get('visibility', 'PUBLIC').upper(),
+            Visibility.PUBLIC
+        )
+        
+        entry, created = Entry.objects.update_or_create(
+            id=entry_uuid,
+            defaults={
+                'author': remote_author,
+                'title': data.get('title', ''),
+                'content': data.get('content', ''),
+                'content_type': data.get('contentType', 'text/plain'),
+                'description': data.get('description', ''),
+                'visibility': visibility,
+                'published': published,
+            }
+        )
+        
+        return Response(
+            {'detail': 'Entry received', 'entry_id': str(entry.id)},
+            status=status.HTTP_201_CREATED if created else status.HTTP_200_OK
+        )
+    
+    def _handle_like(self, recipient: Author, data: dict, request):
+        """Handle incoming like from remote node"""
+        author_data = data.get('author', {})
+        remote_author_full_id = author_data.get('id', '').rstrip('/')
+        object_url = data.get('object', '').rstrip('/')
+        
+        if not remote_author_full_id or not object_url:
+            return Response(
+                {'detail': 'Missing author.id or object'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        # --- extract UUID for remote author ---
+        try:
+            import uuid as uuid_module
+            remote_author_uuid = remote_author_full_id.split('/')[-1]
+            uuid_module.UUID(remote_author_uuid)
+        except (ValueError, IndexError):
+            return Response(
+                {'detail': f'Could not extract valid UUID from author ID: {remote_author_full_id}'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        remote_author, _ = Author.objects.get_or_create(
+            id=remote_author_uuid,
+            defaults={
+                'username': author_data.get('displayName', 'unknown').replace(' ', '_').lower()[:150],
+                'display_name': author_data.get('displayName', 'Unknown'),
+                'is_active': False,
+            }
+        )
+        
+        # Try to extract ID from URL - handle both entry and comment likes
+        try:
+            if '/entries/' in object_url or '/entry/' in object_url:
+                parts = object_url.split('/')
+                entry_id = parts[-1] if parts[-1] else parts[-2]
+                entry = Entry.objects.get(id=entry_id)
+                entry.liked_by.add(remote_author)
+                return Response({'detail': 'Like added to entry'}, status=status.HTTP_200_OK)
+            
+            elif '/comments/' in object_url or '/comment/' in object_url:
+                parts = object_url.split('/')
+                comment_id = parts[-1] if parts[-1] else parts[-2]
+                comment = Comment.objects.get(id=comment_id)
+                comment.liked_by.add(remote_author)
+                return Response({'detail': 'Like added to comment'}, status=status.HTTP_200_OK)
+            
+            else:
+                return Response(
+                    {'detail': 'Could not determine object type from URL'},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+        
+        except (Entry.DoesNotExist, Comment.DoesNotExist):
+            return Response({'detail': 'Object not found'}, status=status.HTTP_404_NOT_FOUND)
+        except Exception as e:
+            return Response({'detail': f'Error processing like: {str(e)}'},
+                            status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+    
+    def _handle_comment(self, recipient: Author, data: dict, request):
+        """Handle incoming comment from remote node"""
+        author_data = data.get('author', {})
+        remote_author_full_id = author_data.get('id', '').rstrip('/')
+        entry_url = data.get('entry', '').rstrip('/')
+        comment_full_id = data.get('id', '').rstrip('/')
+        
+        if not remote_author_full_id or not entry_url or not comment_full_id:
+            return Response(
+                {'detail': 'Missing required fields'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        # --- extract UUID for remote author ---
+        try:
+            import uuid as uuid_module
+            remote_author_uuid = remote_author_full_id.split('/')[-1]
+            uuid_module.UUID(remote_author_uuid)
+        except (ValueError, IndexError):
+            return Response(
+                {'detail': f'Could not extract valid UUID from author ID: {remote_author_full_id}'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        remote_author, _ = Author.objects.get_or_create(
+            id=remote_author_uuid,
+            defaults={
+                'username': author_data.get('displayName', 'unknown').replace(' ', '_').lower()[:150],
+                'display_name': author_data.get('displayName', 'Unknown'),
+                'is_active': False,
+            }
+        )
+        
+        # Extract entry ID from URL
+        try:
+            parts = entry_url.split('/')
+            entry_id = parts[-1] if parts[-1] else parts[-2]
+            entry = Entry.objects.get(id=entry_id, author=recipient)
+        except Entry.DoesNotExist:
+            return Response({'detail': 'Entry not found'}, status=status.HTTP_404_NOT_FOUND)
+        
+        # Extract UUID for comment id 
+        comment_id = comment_full_id         
+        comment, created = Comment.objects.update_or_create(
+            id=comment_id,
+            defaults={
+                'entry': entry,
+                'author': remote_author,
+                'comment': data.get('comment', ''),
+                'content_type': data.get('contentType', 'text/plain'),
+            }
+        )
+        
+        return Response(
+            {'detail': 'Comment received'},
+            status=status.HTTP_201_CREATED if created else status.HTTP_200_OK
+        )
+    
+    def _handle_follow(self, recipient: Author, data: dict, request):
+        """Handle incoming follow request from remote node"""
+        actor_data = data.get('actor', {})
+        remote_author_id = actor_data.get('id', '').rstrip('/')
+        
+        if not remote_author_id:
+            return Response(
+                {'detail': 'Missing actor.id'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        # Extract UUID
+        try:
+            import uuid as uuid_module
+            uuid_str = remote_author_id.split('/')[-1]
+            uuid_module.UUID(uuid_str)
+            author_id_for_db = uuid_str
+        except (ValueError, IndexError, AttributeError):
+            return Response(
+                {'detail': f'Could not extract valid UUID from author ID: {remote_author_id}'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        # Normalize host
+        raw_host = (actor_data.get('host', '') or '').rstrip('/')
+        if raw_host.endswith('/api'):
+            base_host = raw_host[:-4]
+        else:
+            base_host = raw_host
+
+        # Get or create remote author with host
+        remote_author, created = Author.objects.get_or_create(
+            id=author_id_for_db,
+            defaults={
+                'username': actor_data.get('displayName', 'unknown').replace(' ', '_').lower()[:150],
+                'display_name': actor_data.get('displayName', 'Unknown'),
+                'github': actor_data.get('github', ''),
+                'profile_image': actor_data.get('profileImage', ''),
+                'is_active': False,
+                'host': base_host,
+            }
+        )
+        if not created and not getattr(remote_author, 'host', None) and base_host:
+            remote_author.host = base_host
+            remote_author.save(update_fields=['host'])
+        
+        # RECEIVER side: keep this PENDING so user can approve/deny
+        follow_req, created = FollowRequest.objects.get_or_create(
+            follower=remote_author,
+            followee=recipient,
+            defaults={'status': FollowRequestStatus.PENDING}
+        )
+        
+        return Response(
+            {'detail': 'Follow request received'},
+            status=status.HTTP_201_CREATED if created else status.HTTP_200_OK
+        )

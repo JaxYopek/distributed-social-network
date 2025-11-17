@@ -1,5 +1,5 @@
 from django.contrib import admin
-from .models import Entry, Comment
+from .models import Entry, Comment, RemoteNode
 
 @admin.register(Entry)
 class EntryAdmin(admin.ModelAdmin):
@@ -18,3 +18,24 @@ class CommentAdmin(admin.ModelAdmin):
 
     def likes_count(self, obj):
         return obj.likes_count
+    
+@admin.register(RemoteNode)
+class RemoteNodeAdmin(admin.ModelAdmin):
+    list_display = ('name', 'base_url', 'username', 'is_active', 'created_at')
+    list_filter = ('is_active', 'created_at')
+    search_fields = ('name', 'base_url', 'username')
+    readonly_fields = ('created_at', 'updated_at')
+    
+    fieldsets = (
+        ('Node Information', {
+            'fields': ('name', 'base_url', 'is_active')
+        }),
+        ('Authentication Credentials', {
+            'fields': ('username', 'password'),
+            'description': 'Credentials for HTTP Basic Auth. Remote node will use these to authenticate.'
+        }),
+        ('Timestamps', {
+            'fields': ('created_at', 'updated_at'),
+            'classes': ('collapse',)
+        }),
+    )

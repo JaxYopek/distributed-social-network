@@ -66,6 +66,7 @@ class AuthorAPITests(TestCase):
             github='https://github.com/jane',
             is_approved=True
         )
+    
     def test_get_author_profile(self):
         """
         Test: As an author, I want a public page with my profile information
@@ -89,6 +90,9 @@ class AuthorAPITests(TestCase):
         Test: Getting all profiles from the node
         API: GET /api/authors/
         """
+        # Authenticate as a local user before accessing the endpoint
+        self.client.force_authenticate(user=self.user1)
+        
         # Make request
         response = self.client.get(f'/api/authors/')
         
@@ -114,9 +118,6 @@ class AuthorAPITests(TestCase):
         display_names = [a['displayName'] for a in authors_list]
         self.assertIn('John Doe', display_names) 
         self.assertIn('Jane Smith', display_names)
-
-
-
 
 
 class FollowRequestViewTests(TestCase):

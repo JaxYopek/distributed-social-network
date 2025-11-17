@@ -39,7 +39,7 @@ def signup(request):
             username=username,
             email=email,
             password=password,
-            display_name=display_name or username,
+            display_name=(display_name or '').strip() or username,
             is_approved=False  # Requires admin approval
         )
         
@@ -92,35 +92,52 @@ def profile_edit(request, author_id):
 @login_required
 def stream(request):
     """
-    Show the main feed for the logged-in author.
-    Displays publuc posts and user's own posts.    
+    Show the user's stream with:
+    - ALL public entries (from anyone, local or remote)
+    - Unlisted entries from authors I follow
+    - Friends-only entries from my friends
+    - My own entries (all visibilities except deleted)
     """
-    author = request.user 
-
-    # Get candidate entries: all public, friends, unlisted, or own
-    following_authors = author.follow_requests_sent.filter(
+    current_user = request.user
+    
+    # Get all authors the current user is following (approved follows)
+    following = FollowRequest.objects.filter(
+        follower=current_user,
         status=FollowRequestStatus.APPROVED
-    ).values_list("followee", flat=True)
+    ).values_list('followee', flat=True)
+    
+    # Get all authors who follow the current user back (friends)
+    followers = FollowRequest.objects.filter(
+        followee=current_user,
+        status=FollowRequestStatus.APPROVED
+    ).values_list('follower', flat=True)
+    
+    # Friends are mutual follows
+    friends = set(following) & set(followers)
+    
+    entries = Entry.objects.select_related('author').filter(
+        Q(visibility=Visibility.PUBLIC) |  # all public entries (local + remote)
+        Q(author=current_user, visibility__in=[Visibility.UNLISTED, Visibility.FRIENDS]) |  # my unlisted/friends-only
+        Q(author__in=following, visibility=Visibility.UNLISTED) |  # unlisted from people I follow
+        Q(author__in=friends, visibility=Visibility.FRIENDS)  # friends-only from mutual follows
+    ).exclude(
+        visibility=Visibility.DELETED
+    ).distinct().order_by('-published')
 
-    candidate_entries = Entry.objects.filter(
-        Q(visibility=Visibility.PUBLIC) |
-        Q(author=author) |
-        Q(author__in=following_authors) |
-        Q(visibility=Visibility.UNLISTED)
-    ).select_related("author").order_by("-published")
-
-    # Filter using can_view
-    entries = [entry for entry in candidate_entries if entry.can_view(author)]
-
+    
+    # Get pending follow requests count for navbar
+    pending_follow_requests_count = FollowRequest.objects.filter(
+        followee=request.user,
+        status=FollowRequestStatus.PENDING
+    ).count()
+    
     context = {
-        "author": author,
-        "entries": entries,
-        "pending_follow_requests_count": author.follow_requests_received.filter(
-            status=FollowRequestStatus.PENDING
-        ).count(),
+        'entries': entries,
+        'author': current_user,
+        'pending_follow_requests_count': pending_follow_requests_count,
     }
-
-    return render(request, "authors/stream.html", context)
+    
+    return render(request, 'authors/stream.html', context)
 
 # Contains the info for a users profile page
 def profile_detail(request, author_id):
@@ -318,3 +335,8 @@ def friends_list(request, author_id):
         "profile_author": profile_author,
         "title": f"{profile_author.display_name}'s Friends",
     })
+
+@login_required
+def explore_authors(request):
+    """Show explore authors page"""
+    return render(request, 'authors/explore_authors.html')

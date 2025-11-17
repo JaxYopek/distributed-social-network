@@ -76,6 +76,10 @@ class Entry(models.Model):
         if self.visibility == Visibility.DELETED:
             return False
 
+        # Unlisted posts — visible to anyone with the link (even if not logged in)
+        if self.visibility == Visibility.UNLISTED:
+            return True
+        
         if not user or not user.is_authenticated:
             return False
 
@@ -151,3 +155,19 @@ class Comment(models.Model):
     def __str__(self):
         return f"Comment by {self.author} on {self.entry}"
 
+class RemoteNode(models.Model):
+    """Stores credentials for connecting to other team's nodes"""
+    name = models.CharField(max_length=100, unique=True)  # "Team Blue"
+    base_url = models.URLField(help_text="e.g., https://team-dodgerblue.herokuapp.com") # Host URL
+    username = models.CharField(max_length=100, blank=True, default='', help_text="Username they gave us")
+    password = models.CharField(max_length=100, blank=True, default='', help_text="Password they gave us")
+    is_active = models.BooleanField(default=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    
+    def __str__(self):
+        return f"{self.name} ({self.base_url})"
+    
+    class Meta:
+        verbose_name = "Remote Node"
+        verbose_name_plural = "Remote Nodes"

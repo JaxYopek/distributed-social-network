@@ -6,6 +6,7 @@ from .api_views import (
     MyEntriesListView,
     EntryEditDeleteView,
     EntryLikesListView,
+    EntryLikeView,
     AuthorEntryLikesListView,
     CommentLikesListView,
     AuthorLikedListView,
@@ -16,6 +17,7 @@ from .api_views import (
     CommentDetailView,
     CommentLikeView,
     render_markdown_entry,
+    InboxView
 )
 
 app_name = "api"
@@ -25,6 +27,7 @@ urlpatterns = [
     path("entries/<uuid:entry_id>/", EntryDetailView.as_view(), name="entry-detail"),
     path("author/<uuid:author_id>/entries/", MyEntriesListView.as_view(), name="author-entries"),
     path("entries/<uuid:entry_id>/likes/", EntryLikesListView.as_view(), name="entry-likes"),
+    path("entries/<uuid:entry_id>/like/", EntryLikeView.as_view(), name="entry-like"),
     path(
         "authors/<uuid:author_id>/entries/<uuid:entry_id>/likes/",
         AuthorEntryLikesListView.as_view(),
@@ -49,4 +52,7 @@ urlpatterns = [
     path("comments/<uuid:comment_id>/like/", CommentLikeView.as_view(), name="comment-like"),
     path("upload-image/", upload_image, name="upload_image"),
     path('entries/<uuid:entry_id>/rendered/', render_markdown_entry, name='entry-rendered'),
+
+    path("authors/<uuid:author_id>/inbox/", InboxView.as_view(), name="author-inbox"),
+
 ]
