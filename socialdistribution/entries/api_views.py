@@ -22,6 +22,8 @@ import requests
 from requests.auth import HTTPBasicAuth
 from socialdistribution.authentication import RemoteNodeBasicAuthentication
 from typing import Optional
+from socialdistribution.permissions import IsAuthenticatedNodeOrLocalUser
+from django.conf import settings
 
 def resolve_author_or_404(identifier: str) -> Author:
     decoded = unquote(identifier).strip()
@@ -332,7 +334,7 @@ def send_entry_to_remote_followers(entry: Entry, request):
             print(f"[send_entry_to_remote_followers] no RemoteNode for host={follower_host}")
             continue
 
-        auth = HTTPBasicAuth(remote_node.username, remote_node.password) if remote_node.username else None
+        auth = HTTPBasicAuth(settings.OUR_NODE_USERNAME, settings.OUR_NODE_PASSWORD)
 
         payload = {
             "type": "entry",

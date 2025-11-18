@@ -3,12 +3,13 @@ from rest_framework.decorators import api_view, permission_classes as drf_permis
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from socialdistribution.permissions import IsAuthenticatedNode, IsAuthenticatedNodeOrLocalUser, IsLocalUserOnly
+from socialdistribution.authentication import RemoteNodeBasicAuthentication  
 from django.urls import reverse
 import requests
 from requests.auth import HTTPBasicAuth
 from authors.models import Author, FollowRequest, FollowRequestStatus
 from authors.serializers import AuthorSerializer
-
+from django.conf import settings
 
 class AuthorDetailView(generics.RetrieveAPIView):
     """
@@ -18,6 +19,7 @@ class AuthorDetailView(generics.RetrieveAPIView):
     """
     queryset = Author.objects.all()
     serializer_class = AuthorSerializer
+    # Add authentication for remote nodes
     permission_classes = [permissions.AllowAny]
     
     def retrieve(self, request, *args, **kwargs):
@@ -34,9 +36,11 @@ class AuthorListView(generics.ListAPIView):
     Returns a list of approved public authors.
     Accessible to both remote nodes and local users
     """
-    serializer_class = AuthorSerializer 
-    permission_classes = [IsAuthenticatedNodeOrLocalUser]
-
+    serializer_class = AuthorSerializer
+   
+    authentication_classes = [RemoteNodeBasicAuthentication]
+    permission_classes = [IsAuthenticatedNodeOrLocalUser]  
+    
     def get_queryset(self):
         return Author.objects.filter(
             is_active=True,
@@ -57,7 +61,6 @@ class AuthorListView(generics.ListAPIView):
             "results": results,
             "authors": results,
         })
-    
 
 class ExploreAuthorsView(APIView):
     """
@@ -87,7 +90,7 @@ class ExploreAuthorsView(APIView):
                 # Use the existing /api/authors/ endpoint on remote nodes
                 response = requests.get(
                     f"{node.base_url.rstrip('/')}/api/authors/",
-                    auth=HTTPBasicAuth(node.username, node.password) if node.username else None,
+                    auth=HTTPBasicAuth(settings.OUR_NODE_USERNAME, settings.OUR_NODE_PASSWORD),
                     timeout=5
                 )
                 
@@ -229,7 +232,7 @@ def api_follow_author(request):
         
         try:
             # Send to remote inbox
-            auth = HTTPBasicAuth(remote_node.username, remote_node.password) if remote_node.username else None
+            auth = HTTPBasicAuth(settings.OUR_NODE_USERNAME, settings.OUR_NODE_PASSWORD)
 
             response = requests.post(
                 inbox_url,

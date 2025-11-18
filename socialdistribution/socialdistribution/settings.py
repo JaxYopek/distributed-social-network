@@ -163,3 +163,7 @@ _APP_DOMAINS = [h.strip() for h in os.getenv("APP_DOMAINS", "").split(",") if h.
 if _APP_DOMAINS:
     ALLOWED_HOSTS = _APP_DOMAINS
 CSRF_TRUSTED_ORIGINS = [f"https://{h}" for h in _APP_DOMAINS]
+
+# For authenticating to remote nodes (example node credentials)
+OUR_NODE_USERNAME = "dodgerblue_node"
+OUR_NODE_PASSWORD = "1234"
