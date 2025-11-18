@@ -257,7 +257,7 @@ def api_follow_author(request):
                 try:
                     author_response = requests.get(
                         target_author_url,
-                        auth=HTTPBasicAuth(remote_node.username, remote_node.password) if remote_node.username else None,
+                        auth=HTTPBasicAuth(settings.OUR_NODE_USERNAME, settings.OUR_NODE_PASSWORD),
                         timeout=5
                     )
                     
