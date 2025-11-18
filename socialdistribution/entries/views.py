@@ -13,7 +13,12 @@ import uuid
 import base64
 from django.conf import settings
 from django.urls import reverse
-from .api_views import send_entry_to_remote_followers
+from .api_views import (
+    send_entry_to_remote_followers,
+    send_like_to_author_inbox,
+    send_comment_like_to_author_inbox,
+    send_comment_to_author_inbox
+)
 
 
 class PublicEntriesListView(ListView):
@@ -238,7 +243,7 @@ def like_entry(request, entry_id):
         raise PermissionDenied
 
     entry.liked_by.add(request.user)
-
+    send_like_to_author_inbox(entry, request.user, request)
     next_url = request.POST.get("next")
     if next_url and url_has_allowed_host_and_scheme(
         next_url, allowed_hosts={request.get_host()}
@@ -262,12 +267,14 @@ def add_comment(request, entry_id):
 
     form = CommentForm(request.POST)
     if form.is_valid():
-        Comment.objects.create(
+        comment = Comment.objects.create(
             entry=entry,
             author=request.user,
             content=form.cleaned_data["content"],
         )
         messages.success(request, "Comment posted.")
+
+        send_comment_to_author_inbox(comment, request)
     else:
         messages.error(request, "Please correct the comment and try again.")
 
@@ -297,6 +304,9 @@ def like_comment(request, comment_id):
         raise PermissionDenied
 
     comment.liked_by.add(request.user)
+
+    send_comment_like_to_author_inbox(comment, request.user, request)
+
     messages.success(request, "Comment liked.")
     return redirect("entries:view_entry", entry_id=comment.entry.id)
 

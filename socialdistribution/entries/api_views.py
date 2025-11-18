@@ -271,7 +271,7 @@ def send_like_to_author_inbox(entry: Entry, liker: Author, request):
     
     # Only send if author is on a remote node
     if not author_host or author_host == current_host:
-        print(f"[LIKE] Author {author.id} is local, not sending to inbox")
+        print(f"[LIKE] Author {author.id} is local, not sending to inbox Host = {author_host}")
         return
     
     from entries.models import RemoteNode
@@ -750,11 +750,12 @@ def send_comment_to_author_inbox(comment: Comment, request):
     from entries.models import RemoteNode
     
     # Find the remote node
-    remote_node = None
-    for node in RemoteNode.objects.filter(is_active=True):
-        if author_host.startswith(node.base_url.rstrip('/')):
-            remote_node = node
-            break
+    remote_node = (
+        RemoteNode.objects
+        .filter(is_active=True)
+        .filter(base_url__startswith=author_host)
+        .first()
+    )
     
     if not remote_node:
         print(f"[COMMENT] No remote node configured for host {author_host}")
@@ -896,11 +897,12 @@ def send_comment_like_to_author_inbox(comment: Comment, liker: Author, request):
     
     from entries.models import RemoteNode
     
-    remote_node = None
-    for node in RemoteNode.objects.filter(is_active=True):
-        if author_host.startswith(node.base_url.rstrip('/')):
-            remote_node = node
-            break
+    remote_node = (
+        RemoteNode.objects
+        .filter(is_active=True)
+        .filter(base_url__startswith=author_host)
+        .first()
+    )
     
     if not remote_node:
         return

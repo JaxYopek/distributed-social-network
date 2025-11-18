@@ -138,6 +138,7 @@ class CommentSerializer(serializers.ModelSerializer):
             "entry",
             "author",
             "content",
+            "content_type",
             "published",
             "likes",
         ]

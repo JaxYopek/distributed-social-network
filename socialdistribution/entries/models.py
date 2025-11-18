@@ -138,6 +138,12 @@ class Comment(models.Model):
         related_name="comments",
     )
     content = models.TextField()
+
+    content_type = models.CharField(
+    max_length=50,
+    default="text/plain",
+    )
+
     created_at = models.DateTimeField(auto_now_add=True)
     liked_by = models.ManyToManyField(
         User,
