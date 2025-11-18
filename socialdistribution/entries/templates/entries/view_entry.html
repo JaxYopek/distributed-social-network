@@ -9,6 +9,9 @@
         margin: 40px auto 0;
         padding: 0 20px;
     }
+    h2 {
+    margin-top: 20px;
+    }
 
     .card {
         background: white;
@@ -18,7 +21,6 @@
         margin-bottom: 20px;
         position: relative;
     }
-
     /* Back button top-right */
     .btn-back {
         position: absolute;
@@ -145,6 +147,11 @@
     .comment-like-form button:hover {
         text-decoration: underline;
     }
+    .comment-like-form button:disabled:hover,
+    .comment-like-form button.liked-button:hover {
+        text-decoration: none;
+    }
+
     .comment-header {
         display: flex;
         justify-content: space-between;
@@ -200,12 +207,11 @@
 
 <div class="card">
     <div class="entry-header">
-        <h2>{{ entry.title }}</h2>
         <div class="entry-meta">
             By 
             <a href="{{ entry.author.get_absolute_url }}">
                 {{ entry.author.display_name }}
-            </a> • {{ entry.published|date:"F d, Y" }} • {{ entry.liked_by.count }} Likes
+            </a> • {{ entry.published|date:"F d, Y" }} • <span id="entry-like-count">{{ entry.liked_by.count }}</span> Likes
             {% if entry.visibility == 'PUBLIC' %}
                 <span class="visibility-badge badge-public">Public</span>
             {% elif entry.visibility == 'FRIENDS' %}
@@ -214,10 +220,13 @@
                 <span class="visibility-badge badge-unlisted">Unlisted</span>
             {% endif %}
         </div>
+    </div>
+        <h2>{{ entry.title }}</h2>
+
         {% if entry.description %}
             <p style="color: #666; margin-top: 10px;">{{ entry.description }}</p>
         {% endif %}
-    </div>
+
 
     {% load markdown_extras %}
 
@@ -241,7 +250,7 @@
         {% endif %}
     </div>
     
-    <div class="likes-section" style="margin-top: 20px; font-size: 0.95em;">
+    <div class="likes-section" id="likes-section" style="margin-top: 20px; font-size: 0.95em;">
         {% if entry.liked_by.all %}
             {% if entry.liked_by.count > 0 %}
                 <p><strong>Liked by:</strong>
@@ -260,10 +269,30 @@
     </div>
     
     <div class="entry-actions">
-        <form method="post" action="{% url 'entries:like_entry' entry.id %}">
+        <form method="post" action="{% url 'entries:like_entry' entry.id %}" id="entry-like-form">
             {% csrf_token %}
             <input type="hidden" name="next" value="{{ request.get_full_path }}">
-            <button type="submit" class="btn-like">Like ({{ entry.likes_count }})</button>
+            <button
+                id="entry-like-button"
+                {% if has_liked %}
+                    disabled
+                    style="
+                        cursor: default;
+                        background-color: #28a745;
+                    "
+                    onmouseover="this.style.backgroundColor='#28a745'"
+                    onmouseout="this.style.backgroundColor='#28a745'"
+                {% else %}
+                    type="submit"
+                {% endif %}
+                class="btn-like"
+            >
+                {% if has_liked %}
+                    Liked ✔
+                {% else %}
+                    Like ({{ entry.likes_count }})
+                {% endif %}
+            </button>
         </form>
         {% if request.user.id == entry.author.id %}
             <a href="{% url 'entries:edit_entry' entry.id %}" class="btn-edit">Edit</a>
@@ -331,12 +360,29 @@
                 </div>
                 <div class="comment-body">{{ comment.content }}</div>
                 <div class="comment-footer">
-                    <span>{{ comment.likes_count }} like{{ comment.likes_count|pluralize }}</span>
+                    <span>
+                        <span id="comment-like-count-{{ comment.id }}">{{ comment.likes_count }}</span>
+                        like{{ comment.likes_count|pluralize }}
+                    </span>
                     {% if request.user.is_authenticated %}
                         {% if request.user == comment.author or request.user == entry.author %}
-                        <form method="post" action="{% url 'entries:like_comment' comment.id %}" class="comment-like-form">
+                        <form method="post"
+                              action="{% url 'entries:like_comment' comment.id %}"
+                              class="comment-like-form"
+                              data-comment-id="{{ comment.id }}">
                             {% csrf_token %}
-                            <button type="submit">Like</button>
+                            <button type="submit"
+                                    {% if request.user in comment.liked_by.all %}
+                                        disabled
+                                        class="liked-button"
+                                    {% endif %}
+                            >
+                                {% if request.user in comment.liked_by.all %}
+                                    Liked ✔
+                                {% else %}
+                                    Like
+                                {% endif %}
+                            </button>
                         </form>
                         {% endif %}
                     {% endif %}
@@ -361,4 +407,134 @@
         {% endif %}
     </div>
 </div>
+
+<script>
+// CSRF helper
+function getCookie(name) {
+    let cookieValue = null;
+    if (document.cookie && document.cookie !== "") {
+        const cookies = document.cookie.split(";");
+        for (let cookie of cookies) {
+            cookie = cookie.trim();
+            if (cookie.substring(0, name.length + 1) === (name + "=")) {
+                cookieValue = decodeURIComponent(cookie.substring(name.length + 1));
+                break;
+            }
+        }
+    }
+    return cookieValue;
+}
+const csrftoken = getCookie("csrftoken");
+
+document.addEventListener("DOMContentLoaded", function () {
+    // ENTRY LIKE AJAX
+    const entryLikeForm = document.getElementById("entry-like-form");
+    const entryLikeButton = document.getElementById("entry-like-button");
+    const entryLikeCount = document.getElementById("entry-like-count");
+
+    if (entryLikeForm && entryLikeButton && entryLikeCount && !entryLikeButton.disabled) {
+        entryLikeForm.addEventListener("submit", function (e) {
+            e.preventDefault();
+
+            fetch("/api/entries/{{ entry.id }}/like/", {
+                method: "POST",
+                headers: {
+                    "X-CSRFToken": csrftoken,
+                    "X-Requested-With": "XMLHttpRequest",
+                    "Content-Type": "application/json",
+                },
+                body: JSON.stringify({})
+            })
+            .then(resp => {
+                if (!resp.ok) throw new Error("Failed like");
+                return resp.json();
+            })
+            .then(data => {
+            if (typeof data.likes === "number") {
+                entryLikeCount.textContent = data.likes;
+            }
+
+            entryLikeButton.disabled = true;
+            entryLikeButton.textContent = "Liked ✔";
+            entryLikeButton.style.cursor = "default";
+            entryLikeButton.style.backgroundColor = "#28a745";
+            entryLikeButton.onmouseover = function () {
+                entryLikeButton.style.backgroundColor = "#28a745";
+            };
+            entryLikeButton.onmouseout = function () {
+                entryLikeButton.style.backgroundColor = "#28a745";
+            };
+
+            // refresh "Liked by:" block
+            const likesSection = document.getElementById("likes-section");
+            if (!likesSection) return;
+
+            fetch("/api/entries/{{ entry.id }}/likes/?size=100", {
+                headers: {
+                    "X-Requested-With": "XMLHttpRequest"
+                }
+            })
+            .then(r => {
+                if (!r.ok) throw new Error("Failed to load likes list");
+                return r.json();
+            })
+            .then(json => {
+                const items = json.items || json.src || [];
+                if (!items.length) {
+                    likesSection.innerHTML = "<p>No likes yet.</p>";
+                    return;
+                }
+                const names = items.map(like => {
+                    return (like.author && like.author.displayName) || "Unknown";
+                });
+                likesSection.innerHTML =
+                    "<p><strong>Liked by:</strong> " + names.join(", ") + "</p>";
+            })
+            .catch(err => console.error(err));
+        })
+
+        });
+    }
+
+    // COMMENT LIKE AJAX
+    document.querySelectorAll(".comment-like-form").forEach(function (form) {
+        const commentId = form.dataset.commentId;
+        const button = form.querySelector("button");
+
+        form.addEventListener("submit", function (e) {
+            e.preventDefault();
+            if (!commentId || !button || button.disabled) return;
+
+            fetch(`/api/comments/${commentId}/like/`, {
+                method: "POST",
+                headers: {
+                    "X-CSRFToken": csrftoken,
+                    "X-Requested-With": "XMLHttpRequest",
+                    "Content-Type": "application/json",
+                },
+                body: JSON.stringify({})
+            })
+            .then(resp => {
+                if (!resp.ok) throw new Error("Failed comment like");
+                return resp.json();
+            })
+            .then(data => {
+                const countEl = document.getElementById(`comment-like-count-${commentId}`);
+                const newCount = typeof data.likes_count === "number"
+                    ? data.likes_count
+                    : (typeof data.likes === "number" ? data.likes : null);
+                if (countEl && newCount !== null) {
+                    countEl.textContent = newCount;
+                }
+                button.disabled = true;
+                button.textContent = "Liked ✔";
+                button.style.cursor = "default";
+                button.classList.add("liked-button");
+            })
+            .catch(err => console.error(err));
+        });
+    });
+});
+</script>
+
 {% endblock %}

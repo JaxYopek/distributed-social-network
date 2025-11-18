@@ -197,7 +197,9 @@ def view_entry(request, entry_id):
     ):
         comments = comments.filter(author__in=[request.user, entry.author])
     comment_form = CommentForm()
-
+    has_liked = False
+    if request.user.is_authenticated:
+        has_liked = entry.liked_by.filter(id=request.user.id).exists()
     context = {
         "entry": entry,
         "liked_users": liked_users,
@@ -209,6 +211,7 @@ def view_entry(request, entry_id):
             and request.user != entry.author
         ),
         "image_url": image_url,
+        "has_liked": has_liked,
     }
     return render(request, "entries/view_entry.html", context)
 
