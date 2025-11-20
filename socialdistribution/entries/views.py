@@ -17,7 +17,8 @@ from .api_views import (
     send_entry_to_remote_followers,
     send_like_to_author_inbox,
     send_comment_like_to_author_inbox,
-    send_comment_to_author_inbox
+    send_comment_to_author_inbox, 
+    send_comment_to_remote_followers
 )
 
 
@@ -254,35 +255,33 @@ def like_entry(request, entry_id):
         return redirect(next_url)
     return redirect("entries:view_entry", entry_id=entry.id)
 
-
 @login_required
-@require_POST
 def add_comment(request, entry_id):
-    try:
-        entry_uuid = uuid.UUID(str(entry_id))
-    except (ValueError, TypeError):
-        raise Http404("Invalid entry ID")
+    entry = get_object_or_404(Entry, id=entry_id)
 
-    entry = get_object_or_404(Entry, id=entry_uuid)
-
+    # visibility guard – same logic as in view_entry / EntryCommentsListCreateView
     if not entry.can_view(request.user):
-        raise PermissionDenied
+        raise Http404("Entry not found")
 
-    form = CommentForm(request.POST)
-    if form.is_valid():
-        comment = Comment.objects.create(
-            entry=entry,
-            author=request.user,
-            content=form.cleaned_data["content"],
-        )
-        messages.success(request, "Comment posted.")
+    if request.method == "POST":
+        form = CommentForm(request.POST)
+        if form.is_valid():
+            # Save once
+            comment = form.save(commit=False)
+            comment.entry = entry
+            comment.author = request.user
+            comment.save()
 
-        send_comment_to_author_inbox(comment, request)
+            # Federate exactly like the API path
+            send_comment_to_author_inbox(comment, request)
+            send_comment_to_remote_followers(comment, request)
+
+            return redirect("entries:view_entry", entry_id=entry.id)
     else:
-        messages.error(request, "Please correct the comment and try again.")
+        form = CommentForm()
 
+    # Optional: if someone GETs this URL directly
     return redirect("entries:view_entry", entry_id=entry.id)
-
 
 @login_required
 @require_POST

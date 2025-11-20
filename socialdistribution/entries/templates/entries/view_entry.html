@@ -496,44 +496,48 @@ document.addEventListener("DOMContentLoaded", function () {
         });
     }
 
-    // COMMENT LIKE AJAX
     document.querySelectorAll(".comment-like-form").forEach(function (form) {
-        const commentId = form.dataset.commentId;
-        const button = form.querySelector("button");
+    const commentId = form.dataset.commentId;
+    const button = form.querySelector("button");
 
-        form.addEventListener("submit", function (e) {
-            e.preventDefault();
-            if (!commentId || !button || button.disabled) return;
+    form.addEventListener("submit", function (e) {
+        e.preventDefault();
+        if (!commentId || !button || button.disabled) return;
 
-            fetch(`/api/comments/${commentId}/like/`, {
-                method: "POST",
-                headers: {
-                    "X-CSRFToken": csrftoken,
-                    "X-Requested-With": "XMLHttpRequest",
-                    "Content-Type": "application/json",
-                },
-                body: JSON.stringify({})
-            })
-            .then(resp => {
-                if (!resp.ok) throw new Error("Failed comment like");
-                return resp.json();
-            })
-            .then(data => {
-                const countEl = document.getElementById(`comment-like-count-${commentId}`);
-                const newCount = typeof data.likes_count === "number"
-                    ? data.likes_count
-                    : (typeof data.likes === "number" ? data.likes : null);
-                if (countEl && newCount !== null) {
-                    countEl.textContent = newCount;
-                }
-                button.disabled = true;
-                button.textContent = "Liked ✔";
-                button.style.cursor = "default";
-                button.classList.add("liked-button");
-            })
-            .catch(err => console.error(err));
-        });
+        fetch(`/api/comments/${commentId}/like/`, {
+            method: "POST",
+            headers: {
+                "X-CSRFToken": csrftoken,
+                "X-Requested-With": "XMLHttpRequest",
+                "Content-Type": "application/json",
+            },
+            body: JSON.stringify({})
+        })
+        .then(resp => {
+            if (!resp.ok) throw new Error("Failed comment like");
+            return resp.json();
+        })
+        .then(data => {
+            // Update count on page — just like entry likes
+            const countEl = document.getElementById(`comment-like-count-${commentId}`);
+            if (countEl && typeof data.likes_count === "number") {
+                countEl.textContent = data.likes_count;
+            }
+
+            // Update button the same way entry-like does
+            button.disabled = true;
+            button.textContent = "Liked ✔";
+            button.style.cursor = "default";
+            button.classList.add("liked-button");
+
+            // ✔ OPTIONAL: fetch fresh list of likes if you ever show that
+            // (mirrors what entry likes do)
+            // fetch(`/api/comments/${commentId}/likes/?size=100`);
+        })
+        .catch(err => console.error(err));
     });
+});
+
 });
 </script>
 

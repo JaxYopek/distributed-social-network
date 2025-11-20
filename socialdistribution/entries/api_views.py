@@ -976,14 +976,15 @@ class EntryCommentsListCreateView(generics.ListCreateAPIView):
         if not self.request.user.is_authenticated:
             raise Http404("Entry not found")
 
-        # Save locally
+        # Save the comment locally once
         comment = serializer.save(entry=entry, author=self.request.user)
 
-        # Notify remote post author (if the post author is remote)
+        # 1) Notify the *post author* if they are remote
         send_comment_to_author_inbox(comment, self.request)
 
-        # Notify remote followers of this local author
+        # 2) Notify remote followers of this local author (if any)
         send_comment_to_remote_followers(comment, self.request)
+
 
         
         # Save the comment locally
