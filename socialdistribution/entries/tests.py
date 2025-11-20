@@ -340,9 +340,9 @@ class EntryAPITests(TestCase):
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         
         # Verify response structure
-        self.assertIn('results', response.data)
-        
-        entries_list = response.data['results']
+        self.assertIn('src', response.data)
+        entries_list = response.data['src']
+
         
         # Should only contain 2 public entries
         self.assertEqual(len(entries_list), 2)
@@ -353,7 +353,7 @@ class EntryAPITests(TestCase):
             self.assertIn('id', entry)
             self.assertIn('title', entry)
             self.assertIn('content', entry)
-            self.assertIn('content_type', entry)
+            self.assertIn('contentType', entry)
             self.assertIn('visibility', entry)
             self.assertIn('author', entry)
         
@@ -372,7 +372,7 @@ class EntryAPITests(TestCase):
             "title": "New Entry",
             "description": "This is a test entry",
             "content": "Hello world from test",
-            "content_type": "text/plain",
+            "contentType": "text/plain",
             "visibility": "PUBLIC"
         }
 
@@ -385,7 +385,7 @@ class EntryAPITests(TestCase):
         self.assertEqual(response.data['title'], data['title'])
         self.assertEqual(response.data['description'], data['description'])
         self.assertEqual(response.data['content'], data['content'])
-        self.assertEqual(response.data['content_type'], data['content_type'])
+        self.assertEqual(response.data['contentType'], data['contentType'])
 
 
 class RemoteEntryFederationTests(TestCase):
@@ -711,12 +711,12 @@ class CommentAPITests(TestCase):
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertEqual(response.data["type"], "comments")
         self.assertEqual(len(response.data["comments"]), 1)
-        self.assertEqual(response.data["comments"][0]["content"], "Author comment")
+        self.assertEqual(response.data["comments"][0]["comment"], "Author comment")
 
     def test_create_comment_requires_authentication(self):
         response = self.client.post(
             f"/api/entries/{self.public_entry.id}/comments/",
-            {"content": "Anonymous comment"},
+            {"comment": "Anonymous comment"},
             format="json",
         )
 
@@ -726,12 +726,13 @@ class CommentAPITests(TestCase):
         self.client.force_authenticate(user=self.viewer)
         response = self.client.post(
             f"/api/entries/{self.public_entry.id}/comments/",
-            {"content": "Viewer comment"},
+            {"comment": "Viewer comment",
+             "contentType": "text/plain",},
             format="json",
         )
 
         self.assertEqual(response.status_code, status.HTTP_201_CREATED)
-        self.assertEqual(response.data["content"], "Viewer comment")
+        self.assertEqual(response.data["comment"], "Viewer comment")
         self.assertEqual(
             Comment.objects.filter(entry=self.public_entry, author=self.viewer).count(), 1
         )
@@ -766,7 +767,7 @@ class CommentAPITests(TestCase):
         response = self.client.get(f"/api/entries/{friends_entry.id}/comments/")
 
         self.assertEqual(response.status_code, status.HTTP_200_OK)
-        contents = [comment["content"] for comment in response.data["comments"]]
+        contents = [comment["comment"] for comment in response.data["comments"]]
         self.assertIn("Author note", contents)
         self.assertIn("One's comment", contents)
         self.assertNotIn("Two's comment", contents)

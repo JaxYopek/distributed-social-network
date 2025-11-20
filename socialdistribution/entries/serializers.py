@@ -16,10 +16,11 @@ class EntrySerializer(serializers.ModelSerializer):
     id = serializers.SerializerMethodField()
     web = serializers.SerializerMethodField()
     author = AuthorSerializer(read_only=True)
-    content_type = serializers.ChoiceField(                    # content_type - for internal use
-        choices=Entry.CONTENT_TYPE_CHOICES, required=False
+    contentType = serializers.ChoiceField(
+        source='content_type',  # Maps to model's content_type field
+        choices=Entry.CONTENT_TYPE_CHOICES,
+        required=False
     )
-    contentType = serializers.SerializerMethodField()          # contentType - for API compatibility
     comments = serializers.SerializerMethodField()
     likes = serializers.SerializerMethodField()
 
@@ -35,7 +36,6 @@ class EntrySerializer(serializers.ModelSerializer):
             "title",
             "description",
             "contentType",
-            "content_type",
             "content",
             "visibility",
             "published",
@@ -103,21 +103,36 @@ class EntrySerializer(serializers.ModelSerializer):
             "src": src,
         }
     
-    def get_contentType(self, obj):
-        return obj.content_type
-    
-    def to_internal_value(self, data):
-        mutable = data.copy()
-        if "contentType" in mutable and "content_type" not in mutable:
-            mutable["content_type"] = mutable["contentType"]
-        return super().to_internal_value(mutable)
-
     def get_comments(self, obj):
         request = self.context.get("request")
-        visible_comments = obj.comments.all()
-        return CommentSerializer(
-            visible_comments, many=True, context={"request": request}
+
+        # All visible comments for this entry
+        comments_qs = obj.comments.select_related("author").order_by("created_at")
+        comments_data = CommentSerializer(
+            comments_qs, many=True, context=self.context
         ).data
+
+        # HTML + API URLs
+        entry_html_url = self.get_web(obj)
+        comments_api_url = (
+            request.build_absolute_uri(
+                reverse("api:entry-comments", args=[obj.id])
+            )
+            if request
+            else ""
+        )
+
+        count = len(comments_data)
+
+        return {
+            "type": "comments",
+            "web": entry_html_url,
+            "id": comments_api_url,
+            "page_number": 1,
+            "size": count,
+            "count": count,
+            "src": comments_data,
+        }
 
 
 class CommentSerializer(serializers.ModelSerializer):
@@ -129,7 +144,8 @@ class CommentSerializer(serializers.ModelSerializer):
     author = AuthorSerializer(read_only=True)
     published = serializers.DateTimeField(source="created_at", read_only=True)
     likes = serializers.SerializerMethodField()
-
+    contentType = serializers.CharField(source="content_type")
+    comment = serializers.CharField(source="content")
     class Meta:
         model = Comment
         fields = [
@@ -137,8 +153,8 @@ class CommentSerializer(serializers.ModelSerializer):
             "id",
             "entry",
             "author",
-            "content",
-            "content_type",
+            "comment",
+            "contentType",
             "published",
             "likes",
         ]

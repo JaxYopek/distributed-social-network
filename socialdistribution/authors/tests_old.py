@@ -99,10 +99,10 @@ class AuthorAPITests(TestCase):
         self.assertEqual(response.status_code, status.HTTP_200_OK)
     
         # Check pagination structure
-        self.assertIn('results', response.data)
+        self.assertIn('authors', response.data)
                
         # Should have 2 authors
-        authors_list = response.data['results']
+        authors_list = response.data['authors']
         self.assertEqual(len(authors_list), 2)
         
         # Check that all authors have required fields

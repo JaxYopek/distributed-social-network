@@ -171,14 +171,16 @@ class AuthorAndEntryURLTests(APITestCase):
         self.assertEqual(response.status_code, status.HTTP_200_OK)
 
         # Extract the list of authors from the paginated response
-        authors = response.json().get("results", [])  # Use "results" key for paginated data
+        authors = response.json().get("authors", [])  # Use "results" key for paginated data
 
         # Filter the authors created in this test
         created_authors = {str(self.author.id), str(self.author2.id)}
 
         # Extract the IDs of authors returned by the API
-        returned_authors = {author["id"].split("/")[-2] for author in authors}
-
+        returned_authors = {
+            [seg for seg in author["id"].split("/") if seg][-1]
+            for author in authors
+        }
         # Assert that only the authors created in this test are returned
         self.assertTrue(created_authors.issubset(returned_authors))
 

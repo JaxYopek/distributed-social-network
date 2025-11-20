@@ -194,6 +194,7 @@ class LikeSerializerMixin:
             "summary": summary,
             "author": self._serialize_author(request, liker),
             "object": object_url,
+            "published": timezone.now().isoformat(),
         }
 
     def _retrieve_like_object(self, request, like_identifier: str, expected_author_id: str | None = None) -> dict:
@@ -226,6 +227,28 @@ class PublicEntriesListView(generics.ListAPIView):
             Entry.objects.filter(visibility=Visibility.PUBLIC)
             .select_related("author")
             .order_by("-published")
+        )
+    def list(self, request, *args, **kwargs):
+        queryset = self.get_queryset()
+
+        page = max(1, int(request.query_params.get("page", 1)))
+        size = max(1, int(request.query_params.get("size", 10)))
+        start = (page - 1) * size
+        end = start + size
+
+        page_qs = queryset[start:end]
+        serializer = self.get_serializer(
+            page_qs, many=True, context={"request": request}
+        )
+
+        return Response(
+            {
+                "type": "entries",
+                "page_number": page,
+                "size": size,
+                "count": queryset.count(),
+                "src": serializer.data,
+            }
         )
 
 

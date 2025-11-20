@@ -10,10 +10,11 @@ from requests.auth import HTTPBasicAuth
 from authors.models import Author, FollowRequest, FollowRequestStatus
 from authors.serializers import AuthorSerializer
 from django.conf import settings
+from urllib.parse import unquote
 
 class AuthorDetailView(generics.RetrieveAPIView):
     """
-    GET /api/author/<id>
+    GET /api/author/<id>/
     Used to retrieve the author details and serialize them
     Accessible to both remote nodes and local users (public data)
     """
@@ -40,7 +41,7 @@ class AuthorListView(generics.ListAPIView):
    
     authentication_classes = [RemoteNodeBasicAuthentication]
     permission_classes = [IsAuthenticatedNodeOrLocalUser]  
-    
+    pagination_class = None  # Disable pagination for simplicity
     def get_queryset(self):
         return Author.objects.filter(
             is_active=True,
@@ -54,12 +55,12 @@ class AuthorListView(generics.ListAPIView):
         
         queryset = self.get_queryset()
         serializer = self.get_serializer(queryset, many=True)
-        results = serializer.data
+        authors = serializer.data
+
+        # Spec-compliant shape
         return Response({
             "type": "authors",
-            "count": len(results),
-            "results": results,
-            "authors": results,
+            "authors": authors,
         })
 
 class ExploreAuthorsView(APIView):
@@ -394,3 +395,178 @@ def api_unfollow_author(request, author_id):
         return Response({'detail': 'Unfollowed successfully'}, status=status.HTTP_200_OK)
     
     return Response({'detail': 'You are not following this author'}, status=status.HTTP_400_BAD_REQUEST)
+
+@api_view(['GET'])
+@drf_permission_classes([IsLocalUserOnly])
+def followers_list_api(request, author_id):
+    """
+    GET /api/authors/{AUTHOR_SERIAL}/followers
+    Example in spec.
+
+    Local-only: must be authenticated as AUTHOR_SERIAL.
+    Response:
+    {
+        "type": "followers",
+        "followers": [ <author objects> ]
+    }
+    """
+    try:
+        local_author = Author.objects.get(id=author_id)
+    except Author.DoesNotExist:
+        return Response(status=status.HTTP_404_NOT_FOUND)
+
+    # Local only: must be that author
+    if str(request.user.id) != str(author_id):
+        return Response(status=status.HTTP_403_FORBIDDEN)
+
+    follow_qs = FollowRequest.objects.filter(
+        followee=local_author,
+        status=FollowRequestStatus.APPROVED,
+    ).select_related("follower")
+
+    followers = [fr.follower for fr in follow_qs]
+    data = AuthorSerializer(followers, many=True, context={'request': request}).data
+
+    return Response({
+        "type": "followers",
+        "followers": data,
+    }, status=status.HTTP_200_OK)
+
+@api_view(['GET', 'PUT', 'DELETE'])
+@drf_permission_classes([IsAuthenticatedNodeOrLocalUser])
+def followers_detail_api(request, author_id, foreign_author_fqid):
+    """
+    /api/authors/{AUTHOR_SERIAL}/followers/{FOREIGN_AUTHOR_FQID}
+
+    GET  [local, remote]: check if FOREIGN_AUTHOR_FQID is a follower of AUTHOR_SERIAL
+                          -> 200 with author if follower, 404 otherwise
+    PUT  [local]:         accept FOREIGN_AUTHOR_FQID as follower (must have PENDING FollowRequest)
+                          -> 404 if no matching pending follow request
+    DELETE [local]:       deny/remove FOREIGN_AUTHOR_FQID
+                          -> 404 if no matching follow request or follower
+    """
+
+    try:
+        local_author = Author.objects.get(id=author_id)
+    except Author.DoesNotExist:
+        return Response(status=status.HTTP_404_NOT_FOUND)
+
+    foreign_fqid = unquote(foreign_author_fqid).rstrip('/')
+
+    # Helper: map FQID -> Author (local or shadow-remote)
+    def get_or_create_foreign_author():
+        if not foreign_fqid:
+            return None
+
+        # bare UUID / local serial handling (not strictly spec, but convenient)
+        if not foreign_fqid.startswith('http'):
+            try:
+                return Author.objects.get(id=foreign_fqid)
+            except Author.DoesNotExist:
+                return None
+
+        current_api_root = request.build_absolute_uri('/api/').rstrip('/')
+
+        # Local full API URL
+        if foreign_fqid.startswith(current_api_root):
+            foreign_id = foreign_fqid.rstrip('/').split('/')[-1]
+            try:
+                return Author.objects.get(id=foreign_id)
+            except Author.DoesNotExist:
+                return None
+
+        # Remote FQID: http://remote/api/authors/{UUID}
+        remote_serial = foreign_fqid.rstrip('/').split('/')[-1]
+        try:
+            import uuid as uuid_module
+            uuid_module.UUID(remote_serial)
+        except (ValueError, IndexError):
+            return None
+
+        display_name = 'Remote Author'
+        github = ''
+        profile_image = ''
+        try:
+            resp = requests.get(
+                foreign_fqid,
+                auth=HTTPBasicAuth(settings.OUR_NODE_USERNAME, settings.OUR_NODE_PASSWORD),
+                timeout=5,
+            )
+            if resp.ok:
+                info = resp.json()
+                display_name = info.get('displayName', display_name)
+                github = info.get('github', github)
+                profile_image = info.get('profileImage', profile_image)
+        except Exception as e:
+            print(f"[FOLLOWERS API] error fetching remote author info: {e}")
+
+        # Derive host from FQID up to /api/
+        host = None
+        idx = foreign_fqid.find('/api/')
+        if idx != -1:
+            host = foreign_fqid[:idx+5]  # include '/api/'
+
+        foreign_author, _ = Author.objects.get_or_create(
+            id=remote_serial,
+            defaults={
+                "username": f"remote_{remote_serial[:20]}",
+                "display_name": display_name,
+                "github": github,
+                "profile_image": profile_image,
+                "host": host,
+                "is_active": False,
+            },
+        )
+        return foreign_author
+
+    foreign_author = get_or_create_foreign_author()
+
+    is_remote_request = hasattr(request.user, 'node')
+
+    # Remote node is only allowed GET, not PUT/DELETE
+    if is_remote_request and request.method in ['PUT', 'DELETE']:
+        return Response(status=status.HTTP_403_FORBIDDEN)
+
+    # Local requests must act as that author
+    if not is_remote_request and str(request.user.id) != str(author_id):
+        return Response(status=status.HTTP_403_FORBIDDEN)
+
+    # For GET/DELETE we need a resolvable Author
+    if request.method in ['GET', 'DELETE'] and not foreign_author:
+        return Response(status=status.HTTP_404_NOT_FOUND)
+
+    follow_req = None
+    if foreign_author:
+        follow_req = FollowRequest.objects.filter(
+            follower=foreign_author,
+            followee=local_author,
+        ).first()
+
+    # ---------- GET: check if follower ----------
+    if request.method == 'GET':
+        # Only APPROVED counts as follower; anything else -> 404
+        if not follow_req or follow_req.status != FollowRequestStatus.APPROVED:
+            return Response(status=status.HTTP_404_NOT_FOUND)
+
+        data = AuthorSerializer(foreign_author, context={'request': request}).data
+        return Response(data, status=status.HTTP_200_OK)
+
+    # ---------- PUT: accept follower (local only) ----------
+    if request.method == 'PUT':
+        # Must have a PENDING request to accept, otherwise 404 per spec
+        if not follow_req or follow_req.status != FollowRequestStatus.PENDING:
+            return Response(status=status.HTTP_404_NOT_FOUND)
+
+        follow_req.approve()
+        data = AuthorSerializer(foreign_author, context={'request': request}).data
+        return Response(data, status=status.HTTP_200_OK)
+
+    # ---------- DELETE: deny / remove follower ----------
+    if request.method == 'DELETE':
+        # Must return 404 if there is no matching follow request or follower
+        if not follow_req:
+            return Response(status=status.HTTP_404_NOT_FOUND)
+
+        # Deny / revoke by marking REJECTED
+        follow_req.reject()
+        return Response(status=status.HTTP_204_NO_CONTENT)
