@@ -552,29 +552,139 @@ def send_entry_to_remote_followers(entry: Entry, request):
 
 class MyEntriesListView(generics.ListCreateAPIView):
     """
-    GET     [local, remote]  /api/authors/{AUTHOR_SERIAL}/entries/
-    POST    [local]         /api/authors/{AUTHOR_SERIAL}/entries/
+    GET  [local, remote] /api/authors/{AUTHOR_SERIAL}/entries/
+    POST [local]         /api/authors/{AUTHOR_SERIAL}/entries/
+    
+    Visibility rules:
+    - Not authenticated: PUBLIC only
+    - Authenticated as author: all entries
+    - Authenticated as follower: PUBLIC + UNLISTED
+    - Authenticated as friend: all entries
+    - Authenticated as remote node: reject (shouldn't happen per spec)
     """
     serializer_class = EntrySerializer
-    permission_classes = [permissions.IsAuthenticated]
+    permission_classes = [permissions.AllowAny]  # Changed from IsAuthenticated
 
     def get_queryset(self):
-        return (
-            Entry.objects.filter(author=self.request.user)
-            .exclude(visibility="DELETED")
-            .order_by("-published")
-        )
-
-    def perform_create(self, serializer):
-        serializer.save(author=self.request.user)
-        entry = serializer.save(author=self.request.user)
-        send_entry_to_remote_followers(entry, self.request)
+        author_id = self.kwargs['author_id']
+        author = get_object_or_404(Author, id=author_id)
+        
+        # Base queryset (exclude deleted)
+        base_qs = Entry.objects.filter(author=author).exclude(visibility=Visibility.DELETED)
+        
+        # Remote node authentication → reject per spec
+        if hasattr(self.request.user, 'node'):
+            return Response(
+                {"detail": "Remote nodes should not pull entries directly"},
+                status=status.HTTP_403_FORBIDDEN
+            )
+        
+        # Not authenticated → PUBLIC only
+        if not self.request.user.is_authenticated:
+            return base_qs.filter(visibility=Visibility.PUBLIC).order_by('-published')
+        
+        # Authenticated as the author → all entries
+        if str(self.request.user.id) == str(author_id):
+            return base_qs.order_by('-published')
+        
+        # Check follow relationship
+        is_follower = FollowRequest.objects.filter(
+            follower=self.request.user,
+            followee=author,
+            status=FollowRequestStatus.APPROVED
+        ).exists()
+        
+        is_followed_back = FollowRequest.objects.filter(
+            follower=author,
+            followee=self.request.user,
+            status=FollowRequestStatus.APPROVED
+        ).exists()
+        
+        is_friend = is_follower and is_followed_back
+        
+        # Friend → all entries
+        if is_friend:
+            return base_qs.order_by('-published')
+        
+        # Follower → PUBLIC + UNLISTED
+        if is_follower:
+            return base_qs.filter(
+                visibility__in=[Visibility.PUBLIC, Visibility.UNLISTED]
+            ).order_by('-published')
+        
+        # Not following → PUBLIC only
+        return base_qs.filter(visibility=Visibility.PUBLIC).order_by('-published')
 
     def list(self, request, *args, **kwargs):
+        # Handle remote node rejection in get_queryset
         queryset = self.get_queryset()
+        
+        # If get_queryset returned a Response (for remote node), return it
+        if isinstance(queryset, Response):
+            return queryset
+        
         serializer = self.get_serializer(queryset, many=True, context={"request": request})
         return Response({"type": "entries", "src": serializer.data})
 
+    def create(self, request, *args, **kwargs):
+        author_id = self.kwargs['author_id']
+        
+        # Must be authenticated as that author
+        if not request.user.is_authenticated or str(request.user.id) != str(author_id):
+            return Response(
+                {"detail": "Must be authenticated as author"},
+                status=status.HTTP_403_FORBIDDEN
+            )
+        
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        entry = serializer.save(author=request.user)
+        
+        # Send to remote followers
+        send_entry_to_remote_followers(entry, request)
+        
+        headers = self.get_success_headers(serializer.data)
+        return Response(serializer.data, status=status.HTTP_201_CREATED, headers=headers)
+
+class AuthorEntryDetailView(generics.RetrieveUpdateDestroyAPIView):
+    """
+    GET    [local, remote] /api/authors/{AUTHOR_SERIAL}/entries/{ENTRY_SERIAL}
+    PUT    [local]         /api/authors/{AUTHOR_SERIAL}/entries/{ENTRY_SERIAL}
+    DELETE [local]         /api/authors/{AUTHOR_SERIAL}/entries/{ENTRY_SERIAL}
+    """
+    serializer_class = EntrySerializer
+    permission_classes = [permissions.AllowAny]
+
+    def get_object(self):
+        author_id = self.kwargs['author_id']
+        entry_id = self.kwargs['entry_id']
+        
+        entry = get_object_or_404(Entry, id=entry_id, author__id=author_id)
+        
+        # Visibility checks
+        if entry.visibility == Visibility.DELETED:
+            raise Http404("Entry not found")
+        
+        # For PUT/DELETE: must be authenticated as author
+        if self.request.method in ['PUT', 'DELETE']:
+            if not self.request.user.is_authenticated or str(self.request.user.id) != str(author_id):
+                raise Http404("Entry not found")
+        
+        # For GET: visibility checks
+        elif self.request.method == 'GET':
+            if not entry.can_view(self.request.user):
+                raise Http404("Entry not found")
+        
+        return entry
+
+    def perform_update(self, serializer):
+        entry = serializer.save()
+        send_entry_to_remote_followers(entry, self.request)
+
+    def perform_destroy(self, instance):
+        instance.visibility = Visibility.DELETED
+        instance.save(update_fields=["visibility"])
+        send_entry_to_remote_followers(instance, self.request)
 
 class EntryEditDeleteView(generics.RetrieveUpdateDestroyAPIView):
     """
@@ -752,6 +862,71 @@ class AuthorEntryLikesListView(LikeSerializerMixin, APIView):
                 "src": src,
             }
         )
+    
+class AuthorEntryCommentsListCreateView(generics.ListCreateAPIView):
+    """
+    GET  [local, remote] /api/authors/{AUTHOR_SERIAL}/entries/{ENTRY_SERIAL}/comments
+    POST [local]         /api/authors/{AUTHOR_SERIAL}/entries/{ENTRY_SERIAL}/comments
+    """
+    serializer_class = CommentSerializer
+    permission_classes = [permissions.IsAuthenticatedOrReadOnly]
+    _entry = None
+
+    def get_entry(self):
+        if self._entry is not None:
+            return self._entry
+        
+        author_id = self.kwargs['author_id']
+        entry_id = self.kwargs['entry_id']
+        
+        entry = get_object_or_404(Entry, id=entry_id, author__id=author_id)
+        
+        if not entry.can_view(self.request.user):
+            raise Http404("Entry not found")
+        
+        self._entry = entry
+        return entry
+
+    def get_queryset(self):
+        entry = self.get_entry()
+        comments = entry.comments.select_related("author")
+        
+        if (
+            entry.visibility == Visibility.FRIENDS
+            and self.request.user.is_authenticated
+            and self.request.user != entry.author
+        ):
+            comments = comments.filter(author__in=[self.request.user, entry.author])
+        
+        return comments.order_by("created_at")
+
+    def list(self, request, *args, **kwargs):
+        queryset = self.get_queryset()
+        serializer = self.get_serializer(queryset, many=True)
+        
+        entry_url = request.build_absolute_uri(
+            reverse("api:author-entry-detail", args=[self.kwargs['author_id'], self.kwargs['entry_id']])
+        )
+        
+        return Response({
+            "type": "comments",
+            "entry": entry_url,
+            "comments": serializer.data
+        })
+
+    def perform_create(self, serializer):
+        entry = self.get_entry()
+        
+        if not self.request.user.is_authenticated:
+            raise Http404("Entry not found")
+
+        comment = serializer.save(entry=entry, author=self.request.user)
+        
+        # Notify post author if remote
+        send_comment_to_author_inbox(comment, self.request)
+        
+        # Notify remote followers
+        send_comment_to_remote_followers(comment, self.request)
 
 
 class CommentLikesListView(LikeSerializerMixin, APIView):
@@ -1373,7 +1548,7 @@ class EntryImageFQIDView(APIView):
 
 class InboxView(APIView):
     """
-    POST /api/authors/{AUTHOR_ID}/inbox/
+    POST /api/authors/{AUTHOR_SERIAL}/inbox/
     Receives posts/entries, likes, comments, and follow requests from remote nodes.
     """
     authentication_classes = [RemoteNodeBasicAuthentication]

@@ -1,3 +1,4 @@
+from django.http import Http404
 from rest_framework import generics, permissions, status
 from rest_framework.decorators import api_view, permission_classes as drf_permission_classes
 from rest_framework.views import APIView
@@ -13,21 +14,80 @@ from authors.serializers import AuthorSerializer
 from django.conf import settings
 from urllib.parse import unquote
 
-class AuthorDetailView(generics.RetrieveAPIView):
+class AuthorDetailView(generics.RetrieveUpdateAPIView):
     """
-    GET /api/authors/<id>/
-    Used to retrieve the author details and serialize them
-    Accessible to both remote nodes and local users (public data)
+    GET /api/authors/{AUTHOR_SERIAL}/
+    [local] retrieve AUTHOR_SERIAL's profile
+    [remote] retrieve AUTHOR_SERIAL's profile
+    
+    PUT /api/authors/{AUTHOR_SERIAL}/
+    [local] update AUTHOR_SERIAL's profile (must be authenticated as that author)
     """
     queryset = Author.objects.all()
     serializer_class = AuthorSerializer
-    # Add authentication for remote nodes
-    permission_classes = [permissions.AllowAny]
+    permission_classes = [permissions.AllowAny]  # GET is public, PUT checks in update()
     
     def retrieve(self, request, *args, **kwargs):
         # Log if accessed by remote node
         if hasattr(request.user, 'node'):
             print(f"Remote node {request.user.node.name} accessing author detail")
+        
+        return super().retrieve(request, *args, **kwargs)
+    
+    def update(self, request, *args, **kwargs):
+        """
+        Only the author themselves can update their profile
+        """
+        instance = self.get_object()
+        
+        # Must be authenticated as that author
+        if not request.user.is_authenticated or str(request.user.id) != str(instance.id):
+            return Response(
+                {"detail": "You can only update your own profile"},
+                status=status.HTTP_403_FORBIDDEN
+            )
+        
+        # Partial update to allow updating only some fields
+        serializer = self.get_serializer(instance, data=request.data, partial=True)
+        serializer.is_valid(raise_exception=True)
+        self.perform_update(serializer)
+        
+        return Response(serializer.data)
+
+
+class AuthorFQIDView(generics.RetrieveAPIView):
+    """
+    GET /api/authors/{AUTHOR_FQID}/
+    [remote] retrieve author by fully qualified ID (URL-encoded)
+    
+    This endpoint handles FQID lookups where the author ID is a full URL.
+    Example: /api/authors/http%3A%2F%2Fnodeaaaa%2Fapi%2Fauthors%2F111/
+    """
+    serializer_class = AuthorSerializer
+    permission_classes = [permissions.AllowAny]
+    
+    def get_object(self):
+        author_fqid = unquote(self.kwargs['author_fqid']).rstrip('/')
+        
+        # Extract UUID from FQID
+        # FQID format: http://nodeaaaa/api/authors/{UUID}
+        author_serial = author_fqid.rstrip('/').split('/')[-1]
+        
+        try:
+            import uuid as uuid_module
+            uuid_module.UUID(author_serial)  # Validate it's a UUID
+        except (ValueError, AttributeError):
+            raise Http404("Invalid author ID in FQID")
+        
+        try:
+            return Author.objects.get(id=author_serial)
+        except Author.DoesNotExist:
+            raise Http404("Author not found")
+    
+    def retrieve(self, request, *args, **kwargs):
+        # Log if accessed by remote node
+        if hasattr(request.user, 'node'):
+            print(f"Remote node {request.user.node.name} accessing author via FQID")
         
         return super().retrieve(request, *args, **kwargs)
 

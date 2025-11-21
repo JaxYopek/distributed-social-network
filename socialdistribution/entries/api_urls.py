@@ -28,6 +28,7 @@ from .api_views import (
     CommentedFQIDDetailView,
     FollowRequestsListView,
     EntryCommentsFQIDView,
+    AuthorEntryCommentsListCreateView,
 )
 
 app_name = "api"
@@ -64,6 +65,11 @@ urlpatterns = [
     # Comment endpoints
     path("entries/<uuid:entry_id>/comments/", EntryCommentsListCreateView.as_view(), name="entry-comments"),
     path("entries/<path:entry_fqid>/comments/", EntryCommentsFQIDView.as_view(), name="entry-comments-fqid"),
+    path(
+        "authors/<uuid:author_id>/entries/<uuid:entry_id>/comments",
+        AuthorEntryCommentsListCreateView.as_view(),
+        name="author-entry-comments"
+    ),
     path(
         "authors/<uuid:author_id>/entries/<uuid:entry_id>/comment/<path:remote_comment_fqid>",
         CommentFQIDView.as_view(),
