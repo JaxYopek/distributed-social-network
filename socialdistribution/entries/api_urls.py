@@ -12,7 +12,6 @@ from .api_views import (
     AuthorLikedListView,
     AuthorLikedFQIDView,
     AuthorLikedDetailView,
-    LikeDetailView,
     EntryCommentsListCreateView,
     CommentDetailView,
     CommentLikeView,
@@ -29,6 +28,8 @@ from .api_views import (
     FollowRequestsListView,
     EntryCommentsFQIDView,
     AuthorEntryCommentsListCreateView,
+    CommentLikesFQIDView,
+    LikeFQIDView,
 )
 
 app_name = "api"
@@ -51,8 +52,13 @@ urlpatterns = [
         AuthorEntryLikesListView.as_view(),
         name="author-entry-likes",
     ),
+    path(
+        "authors/<uuid:author_id>/entries/<uuid:entry_id>/comments/<path:comment_fqid>/likes",
+        CommentLikesFQIDView.as_view(),
+        name="author-entry-comment-likes-fqid",
+    ),
  
-    # Likes endpoints
+    # Liked endpoints
     path("authors/<uuid:author_id>/liked/", AuthorLikedListView.as_view(), name="author-liked"),
     path("authors/<path:author_fqid>/liked/", AuthorLikedFQIDView.as_view(), name="author-liked-fqid"),
     path(
@@ -60,7 +66,7 @@ urlpatterns = [
         AuthorLikedDetailView.as_view(),
         name="author-liked-detail",
     ),
-    path("liked/<str:like_id>/", LikeDetailView.as_view(), name="liked-detail"),
+    path("liked/<path:like_fqid>", LikeFQIDView.as_view(), name="liked-fqid"),
 
     # Comment endpoints
     path("entries/<uuid:entry_id>/comments/", EntryCommentsListCreateView.as_view(), name="entry-comments"),
@@ -92,6 +98,8 @@ urlpatterns = [
 
     # Follow Request endpoints
     path("authors/<uuid:author_id>/follow_requests", FollowRequestsListView.as_view(), name="follow-requests"),
+
+    # Inbox endpoint (which handles multiple types of objects)
     path("authors/<uuid:author_id>/inbox/", InboxView.as_view(), name="author-inbox"),
 
     # Image endpoints

@@ -20,7 +20,8 @@ from django.utils import timezone
 from dateutil import parser as date_parser
 import requests
 from requests.auth import HTTPBasicAuth
-from socialdistribution.authentication import RemoteNodeBasicAuthentication
+from socialdistribution.authentication import RemoteNodeBasicAuthentication, HybridAuthentication
+from socialdistribution.pagination import CustomPageNumberPagination
 from typing import Optional
 from socialdistribution.permissions import IsAuthenticatedNodeOrLocalUser
 from django.conf import settings
@@ -221,6 +222,7 @@ class LikeSerializerMixin:
 
 class PublicEntriesListView(generics.ListAPIView):
     serializer_class = EntrySerializer
+    authentication_classes = [HybridAuthentication]
     permission_classes = [permissions.AllowAny]
 
     def get_queryset(self):
@@ -258,6 +260,7 @@ class EntryDetailView(generics.RetrieveUpdateDestroyAPIView):
     GET /api/entries/<uuid:entry_id>/
     Returns a single entry if visible to the requester.
     """
+    authentication_classes = [HybridAuthentication]
     permission_classes = [permissions.AllowAny]
 
     def get_object(self, entry_id):
@@ -563,7 +566,9 @@ class MyEntriesListView(generics.ListCreateAPIView):
     - Authenticated as remote node: reject (shouldn't happen per spec)
     """
     serializer_class = EntrySerializer
-    permission_classes = [permissions.AllowAny]  # Changed from IsAuthenticated
+    authentication_classes = [HybridAuthentication]
+    permission_classes = [permissions.AllowAny]  
+    
 
     def get_queryset(self):
         author_id = self.kwargs['author_id']
@@ -653,6 +658,7 @@ class AuthorEntryDetailView(generics.RetrieveUpdateDestroyAPIView):
     DELETE [local]         /api/authors/{AUTHOR_SERIAL}/entries/{ENTRY_SERIAL}
     """
     serializer_class = EntrySerializer
+    authentication_classes = [HybridAuthentication]
     permission_classes = [permissions.AllowAny]
 
     def get_object(self):
@@ -764,9 +770,10 @@ class EntryLikeView(APIView):
 
 class EntryLikesListView(LikeSerializerMixin, APIView):
     """
-    GET /api/entries/{ENTRY_FQID}/likes/
-    Returns a paginated list of authors who liked the entry.
+    GET [local] /api/entries/{ENTRY_ID}/likes
+    Returns a paginated list of likes on this entry
     """
+    authentication_classes = [HybridAuthentication]
     permission_classes = [permissions.AllowAny]
 
     def get(self, request, entry_id):
@@ -783,31 +790,32 @@ class EntryLikesListView(LikeSerializerMixin, APIView):
         count = likes_qs.count()
         likes_page = likes_qs[start:end]
 
-        likes_api_url = request.build_absolute_uri(reverse("api:entry-likes", args=[entry.id]))
-        entry_html_url = request.build_absolute_uri(reverse("entries:view_entry", args=[entry.id]))
+        # Use the UUID-based likes endpoint URL
+        likes_api_url = request.build_absolute_uri(
+            reverse("api:entry-likes", args=[entry.id])
+        )
 
         src = [self._build_entry_like_object(request, entry, author) for author in likes_page]
 
-        return Response(
-            {
-                "type": "likes",
-                "web": entry_html_url,
-                "id": likes_api_url,
-                "page_number": page,
-                "size": size,
-                "count": count,
-                "items": src,
-                "src": src,
-            }
-        )
+        return Response({
+            "type": "likes",
+            "id": likes_api_url,
+            "page": page,
+            "size": size,
+            "count": count,
+            "src": src,
+        })
     
 class EntryLikesFQIDView(LikeSerializerMixin, APIView):
     """
     GET [local] /api/entries/{ENTRY_FQID}/likes
+    Returns all likes on this entry (by FQID)
     """
+    authentication_classes = [HybridAuthentication]
     permission_classes = [permissions.AllowAny]
 
     def get(self, request, entry_fqid):
+        # Extract UUID from FQID
         entry_id = entry_fqid.rstrip('/').split('/')[-1]
         entry = get_object_or_404(Entry, id=entry_id)
         
@@ -822,12 +830,12 @@ class EntryLikesFQIDView(LikeSerializerMixin, APIView):
             "src": src,
         })
 
-
 class AuthorEntryLikesListView(LikeSerializerMixin, APIView):
     '''
-    GET /api/author/<uuid:author_id>/entries/<uuid:entry_id>/likes/
+    GET [local, remote] /api/authors/{AUTHOR_SERIAL}/entries/{ENTRY_SERIAL}/likes/
     Returns a paginated list of authors who liked the entry.
     '''
+    authentication_classes = [HybridAuthentication]
     permission_classes = [permissions.AllowAny]
 
     def get(self, request, author_id, entry_id):
@@ -869,6 +877,7 @@ class AuthorEntryCommentsListCreateView(generics.ListCreateAPIView):
     POST [local]         /api/authors/{AUTHOR_SERIAL}/entries/{ENTRY_SERIAL}/comments
     """
     serializer_class = CommentSerializer
+    authentication_classes = [HybridAuthentication]
     permission_classes = [permissions.IsAuthenticatedOrReadOnly]
     _entry = None
 
@@ -973,12 +982,42 @@ class CommentLikesListView(LikeSerializerMixin, APIView):
             }
         )
 
+class CommentLikesFQIDView(LikeSerializerMixin, APIView):
+    """
+    GET [local, remote] /api/authors/{AUTHOR_SERIAL}/entries/{ENTRY_SERIAL}/comments/{COMMENT_FQID}/likes
+    Returns all likes on a comment (by FQID)
+    """
+    authentication_classes = [HybridAuthentication]
+    permission_classes = [permissions.AllowAny]
+
+    def get(self, request, author_id, entry_id, comment_fqid):
+        # Verify entry belongs to author
+        entry = get_object_or_404(Entry, id=entry_id, author__id=author_id)
+        
+        if not entry.can_view(request.user):
+            raise Http404("Comment not found")
+        
+        # Extract comment UUID from FQID
+        comment_id = unquote(comment_fqid).rstrip('/').split('/')[-1]
+        
+        # Get comment
+        comment = get_object_or_404(Comment, id=comment_id, entry=entry)
+        
+        # Get all likes
+        likes_qs = comment.liked_by.all()
+        src = [self._build_comment_like_object(request, comment, author) for author in likes_qs]
+        
+        return Response({
+            "type": "likes",
+            "src": src,
+        })
 
 class AuthorLikedListView(LikeSerializerMixin, APIView):
     '''
-    GET /api/author/<uuid:author_id>/liked/
+    GET /api/authors/{AUTHOR_SERIAL}/liked/
     Returns a paginated list of all likes made by the author.
     '''
+    authentication_classes = [HybridAuthentication]
     permission_classes = [permissions.AllowAny]
 
     def get_author(self, identifier: str) -> Author:
@@ -1029,7 +1068,7 @@ class AuthorLikedListView(LikeSerializerMixin, APIView):
 
 class AuthorLikedFQIDView(AuthorLikedListView):
     '''
-    GET /api/author/fqid/<path:author_fqid>/liked/
+    GET [local] /api/authors/{AUTHOR_FQID}/liked
     Returns a paginated list of all likes made by the author.
     '''
     def get(self, request, author_fqid):
@@ -1039,9 +1078,10 @@ class AuthorLikedFQIDView(AuthorLikedListView):
 
 class AuthorLikedDetailView(LikeSerializerMixin, APIView):
     '''
-    GET /api/author/<uuid:author_id>/liked/<str:like_id>/
+    GET [local, remote] /api/authors/{AUTHOR_SERIAL}/liked/{LIKE_SERIAL}/
     Retrieves a specific like made by the author.
     '''
+    authentication_classes = [HybridAuthentication]
     permission_classes = [permissions.AllowAny]
 
     def get(self, request, author_id, like_id):
@@ -1121,14 +1161,23 @@ def send_comment_to_author_inbox(comment: Comment, request):
     except requests.RequestException as e:
         print(f"[COMMENT] Error sending comment to remote inbox: {e}")
 
-class LikeDetailView(LikeSerializerMixin, APIView):
+    
+class LikeFQIDView(LikeSerializerMixin, APIView):
     '''
-    GET /api/liked/<str:like_id>/
-    Retrieves a specific like by its identifier.
+    GET [local] /api/liked/{LIKE_FQID}
+    Retrieves a specific like by its fully qualified ID (URL-encoded)
     '''
+    authentication_classes = [HybridAuthentication]
     permission_classes = [permissions.AllowAny]
 
-    def get(self, request, like_id):
+    def get(self, request, like_fqid):
+        decoded_fqid = unquote(like_fqid).rstrip('/')
+        
+        # Extract the like_id from the FQID
+        # FQID format: http://node/api/liked/{LIKE_ID}
+        like_id = decoded_fqid.split('/')[-1]
+        
+        # Use existing logic to retrieve the like
         like_object = self._retrieve_like_object(request, like_id)
         return Response(like_object)
     
@@ -1138,6 +1187,7 @@ class EntryCommentsListCreateView(generics.ListCreateAPIView):
     POST /api/entries/<entry_id>/comments/
     """
     serializer_class = CommentSerializer
+    authentication_classes = [HybridAuthentication]
     permission_classes = [permissions.IsAuthenticatedOrReadOnly]
     _entry = None
 
@@ -1195,6 +1245,7 @@ class EntryCommentsFQIDView(generics.ListAPIView):
     GET [local, remote] /api/entries/{ENTRY_FQID}/comments
     """
     serializer_class = CommentSerializer
+    authentication_classes = [HybridAuthentication]
     permission_classes = [permissions.AllowAny]
 
     def get_queryset(self):
@@ -1222,6 +1273,7 @@ class CommentDetailView(generics.RetrieveAPIView):
     GET /api/comments/<comment_id>/
     """
     serializer_class = CommentSerializer
+    authentication_classes = [HybridAuthentication]
     permission_classes = [permissions.AllowAny]
 
     def get_object(self):
@@ -1245,6 +1297,7 @@ class CommentFQIDView(generics.RetrieveAPIView):
     GET [local, remote] /api/authors/{AUTHOR_SERIAL}/entries/{ENTRY_SERIAL}/comment/{REMOTE_COMMENT_FQID}
     """
     serializer_class = CommentSerializer
+    authentication_classes = [HybridAuthentication]
     permission_classes = [permissions.AllowAny]
 
     def get_object(self):
@@ -1343,11 +1396,19 @@ class CommentLikeView(APIView):
     
 class CommentedListView(generics.ListCreateAPIView):
     """
-    GET /api/authors/{AUTHOR_SERIAL}/commented
-    POST /api/authors/{AUTHOR_SERIAL}/commented
+    GET [local, remote] /api/authors/{AUTHOR_SERIAL}/commented
+    POST [local] /api/authors/{AUTHOR_SERIAL}/commented
+    
+    GET: Returns paginated list of comments author has made
+    - [local] any entry
+    - [remote] public and unlisted entries only
+    
+    POST: Creates a comment on specified entry and forwards to entry author's inbox
     """
     serializer_class = CommentSerializer
+    authentication_classes = [HybridAuthentication]
     permission_classes = [IsAuthenticatedNodeOrLocalUser]
+    pagination_class = CustomPageNumberPagination
 
     def get_queryset(self):
         author_id = self.kwargs['author_id']
@@ -1358,59 +1419,155 @@ class CommentedListView(generics.ListCreateAPIView):
             return Comment.objects.filter(
                 author=author,
                 entry__visibility__in=[Visibility.PUBLIC, Visibility.UNLISTED]
-            ).select_related('entry', 'entry__author').order_by('-created_at')
+            ).select_related('entry', 'entry__author', 'author').order_by('-created_at')
         
         # For local requests: all comments
         return Comment.objects.filter(
             author=author
-        ).select_related('entry', 'entry__author').order_by('-created_at')
+        ).select_related('entry', 'entry__author', 'author').order_by('-created_at')
 
     def list(self, request, *args, **kwargs):
-        queryset = self.get_queryset()
+        """
+        GET /api/authors/{AUTHOR_SERIAL}/commented
+        Returns array of comment objects (spec format)
+        """
+        queryset = self.filter_queryset(self.get_queryset())
         
-        # Pagination
-        page = max(1, int(request.query_params.get("page", 1)))
-        size = max(1, int(request.query_params.get("size", 10)))
-        start = (page - 1) * size
-        end = start + size
+        # Use DRF's built-in pagination
+        page = self.paginate_queryset(queryset)
+        if page is not None:
+            serializer = self.get_serializer(page, many=True)
+            # Return array directly per spec example
+            return Response(serializer.data)
         
-        page_qs = queryset[start:end]
-        serializer = self.get_serializer(page_qs, many=True)
-        
+        # Fallback if pagination is disabled
+        serializer = self.get_serializer(queryset, many=True)
         return Response(serializer.data)
 
     def create(self, request, *args, **kwargs):
         """
-        POST a comment object - forward to correct inbox
+        POST /api/authors/{AUTHOR_SERIAL}/commented
+        
+        Body example:
+        {
+            "type": "comment",
+            "comment": "Great post!",
+            "contentType": "text/plain",
+            "entry": "http://nodebbbb/api/authors/222/entries/249/"
+        }
+        
+        Creates comment locally and forwards to entry author's inbox
         """
         author_id = self.kwargs['author_id']
         author = get_object_or_404(Author, id=author_id)
         
-        # Must be authenticated as that author
-        if str(request.user.id) != str(author_id):
-            return Response(status=status.HTTP_403_FORBIDDEN)
+        # Must be authenticated as that author (local only)
+        if not request.user.is_authenticated or str(request.user.id) != str(author_id):
+            return Response(
+                {"detail": "Must be authenticated as this author"},
+                status=status.HTTP_403_FORBIDDEN
+            )
+        
+        # Validate type field
+        if request.data.get('type', '').lower() != 'comment':
+            return Response(
+                {"detail": "Type must be 'comment'"},
+                status=status.HTTP_400_BAD_REQUEST
+            )
         
         # Get entry from comment data
         entry_url = request.data.get('entry', '').rstrip('/')
+        if not entry_url:
+            return Response(
+                {"detail": "Missing 'entry' field"},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        # Extract entry ID from URL (could be remote or local)
         entry_id = entry_url.split('/')[-1]
         
-        entry = get_object_or_404(Entry, id=entry_id)
+        try:
+            entry = Entry.objects.get(id=entry_id)
+        except Entry.DoesNotExist:
+            return Response(
+                {"detail": "Entry not found"},
+                status=status.HTTP_404_NOT_FOUND
+            )
         
-        # Create comment locally
-        serializer = self.get_serializer(data=request.data)
+        # Create comment data for serializer
+        comment_data = {
+            'content': request.data.get('comment', ''),
+            'content_type': request.data.get('contentType', 'text/plain'),
+        }
+        
+        # Validate and create comment
+        serializer = self.get_serializer(data=comment_data)
         serializer.is_valid(raise_exception=True)
         comment = serializer.save(entry=entry, author=author)
         
         # Forward to entry author's inbox if remote
         send_comment_to_author_inbox(comment, request)
         
-        return Response(serializer.data, status=status.HTTP_201_CREATED)
+        # Get full serialized response
+        response_serializer = self.get_serializer(comment)
+        return Response(response_serializer.data, status=status.HTTP_201_CREATED)
+
+class CommentedDetailView(generics.RetrieveAPIView):
+    """
+    GET [local, remote] /api/authors/{AUTHOR_SERIAL}/commented/{COMMENT_SERIAL}
+    Returns single comment object in format
+    """
+    serializer_class = CommentSerializer
+    authentication_classes = [HybridAuthentication]
+    permission_classes = [IsAuthenticatedNodeOrLocalUser]
+
+    def get_object(self):
+        author_id = self.kwargs['author_id']
+        comment_id = self.kwargs['comment_id']
+        
+        comment = get_object_or_404(
+            Comment.objects.select_related('entry', 'entry__author', 'author'),
+            id=comment_id,
+            author__id=author_id
+        )
+        
+        # For remote requests: only public + unlisted entries
+        if hasattr(self.request.user, 'node'):
+            if comment.entry.visibility not in [Visibility.PUBLIC, Visibility.UNLISTED]:
+                raise Http404("Comment not found")
+        
+        return comment
 
 
-class CommentedFQIDListView(CommentedListView):
+class CommentedFQIDDetailView(generics.RetrieveAPIView):
     """
-    GET /api/authors/{AUTHOR_FQID}/commented
+    GET [local] /api/commented/{COMMENT_FQID}
+    Returns single comment object by FQID
     """
+    serializer_class = CommentSerializer
+    authentication_classes = [HybridAuthentication]
+    permission_classes = [permissions.AllowAny]
+
+    def get_object(self):
+        comment_fqid = unquote(self.kwargs['comment_fqid'])
+        comment_id = comment_fqid.rstrip('/').split('/')[-1]
+        
+        return get_object_or_404(
+            Comment.objects.select_related('entry', 'entry__author', 'author'),
+            id=comment_id
+        )
+
+
+class CommentedFQIDListView(generics.ListAPIView):
+    """
+    GET [local] /api/authors/{AUTHOR_FQID}/commented
+    Returns list of comments by author FQID (that local node knows about)
+    """
+    serializer_class = CommentSerializer
+    authentication_classes = [HybridAuthentication]
+    permission_classes = [permissions.AllowAny]
+    pagination_class = CustomPageNumberPagination
+
     def get_queryset(self):
         author_fqid = unquote(self.kwargs['author_fqid'])
         author_id = author_fqid.rstrip('/').split('/')[-1]
@@ -1419,39 +1576,18 @@ class CommentedFQIDListView(CommentedListView):
         # Local node only knows about comments it has seen
         return Comment.objects.filter(
             author=author
-        ).select_related('entry', 'entry__author').order_by('-created_at')
+        ).select_related('entry', 'entry__author', 'author').order_by('-created_at')
 
-
-class CommentedDetailView(generics.RetrieveAPIView):
-    """
-    GET /api/authors/{AUTHOR_SERIAL}/commented/{COMMENT_SERIAL}
-    """
-    serializer_class = CommentSerializer
-    permission_classes = [IsAuthenticatedNodeOrLocalUser]
-
-    def get_object(self):
-        author_id = self.kwargs['author_id']
-        comment_id = self.kwargs['comment_id']
+    def list(self, request, *args, **kwargs):
+        queryset = self.filter_queryset(self.get_queryset())
         
-        return get_object_or_404(
-            Comment.objects.select_related('entry'),
-            id=comment_id,
-            author__id=author_id
-        )
-
-
-class CommentedFQIDDetailView(generics.RetrieveAPIView):
-    """
-    GET /api/commented/{COMMENT_FQID}
-    """
-    serializer_class = CommentSerializer
-    permission_classes = [permissions.AllowAny]
-
-    def get_object(self):
-        comment_fqid = unquote(self.kwargs['comment_fqid'])
-        comment_id = comment_fqid.rstrip('/').split('/')[-1]
+        page = self.paginate_queryset(queryset)
+        if page is not None:
+            serializer = self.get_serializer(page, many=True)
+            return Response(serializer.data)
         
-        return get_object_or_404(Comment, id=comment_id)
+        serializer = self.get_serializer(queryset, many=True)
+        return Response(serializer.data)
 
     
 def render_markdown_entry(request, entry_id):
@@ -1475,6 +1611,7 @@ class EntryImageView(APIView):
     GET [local, remote] /api/authors/{AUTHOR_SERIAL}/entries/{ENTRY_SERIAL}/image
     Return the binary image if entry is an image type
     """
+    authentication_classes = [HybridAuthentication]
     permission_classes = [permissions.AllowAny]
 
     def get(self, request, author_id, entry_id):
@@ -1514,6 +1651,7 @@ class EntryImageFQIDView(APIView):
     GET [local, remote] /api/entries/{ENTRY_FQID}/image
     Return the binary image by FQID
     """
+    authentication_classes = [HybridAuthentication]
     permission_classes = [permissions.AllowAny]
 
     def get(self, request, entry_fqid):
@@ -1804,6 +1942,7 @@ class FollowRequestsListView(APIView):
     GET /api/authors/{AUTHOR_SERIAL}/follow_requests
     Returns pending follow requests for the author
     """
+    authentication_classes = [HybridAuthentication]
     permission_classes = [permissions.AllowAny]
 
     def get(self, request, author_id):
