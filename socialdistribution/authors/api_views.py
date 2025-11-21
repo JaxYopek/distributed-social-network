@@ -106,7 +106,7 @@ class ExploreAuthorsView(APIView):
                     if not author_id:
                         continue
 
-                    # 🔐 Only keep authors whose ID lives under this node's base_url
+                    # Only keep authors whose ID lives under this node's base_url
                     # so that api_follow_author's startswith(node.base_url) logic will succeed.
                     if not author_id.startswith(node_base):
                         continue
