@@ -18,7 +18,15 @@ class RemoteNodeBasicAuthentication(authentication.BasicAuthentication):
     def authenticate_credentials(self, userid, password, request=None):
         """
         Authenticate the userid and password against our node credentials.
+        
         """
+        print(f"[AUTH] Incoming auth attempt:")
+        print(f"[AUTH] Received userid: {userid}")
+        print(f"[AUTH] Received password: {password}")
+        print(f"[AUTH] Expected userid: {settings.OUR_NODE_USERNAME}")
+        print(f"[AUTH] Expected password: {settings.OUR_NODE_PASSWORD}")
+        print(f"[AUTH] Match: {userid == settings.OUR_NODE_USERNAME and password == settings.OUR_NODE_PASSWORD}")
+        
         if userid != settings.OUR_NODE_USERNAME or password != settings.OUR_NODE_PASSWORD:
             raise exceptions.AuthenticationFailed('Invalid node credentials')
         

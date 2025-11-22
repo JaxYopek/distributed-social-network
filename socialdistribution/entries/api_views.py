@@ -1335,25 +1335,31 @@ class InboxView(APIView):
     def _handle_follow(self, recipient: Author, data: dict):
         """
         Handle incoming follow request.
-        Spec: type: 'follow', with:
-        - actor: follower (remote)
-        - object: followee (local recipient)
-        We only care about the actor here; URL path already tells us the followee.
         """
+        print(f"[INBOX FOLLOW] Received data: {data}")
+        
         actor_data = data.get("actor") or {}
+        print(f"[INBOX FOLLOW] Actor data: {actor_data}")
+        
         remote_author = _resolve_remote_author_from_data(actor_data)
+        print(f"[INBOX FOLLOW] Resolved remote author: {remote_author}")
 
         if not remote_author:
+            print(f"[INBOX FOLLOW] Failed to resolve remote author!")
             return Response(
                 {"detail": "Missing or invalid actor"},
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
+        print(f"[INBOX FOLLOW] Creating FollowRequest: follower={remote_author.id}, followee={recipient.id}")
+        
         fr, created = FollowRequest.objects.get_or_create(
             follower=remote_author,
             followee=recipient,
             defaults={"status": FollowRequestStatus.PENDING},
         )
+        
+        print(f"[INBOX FOLLOW] FollowRequest created={created}, status={fr.status}")
 
         return Response(
             {"detail": "Follow request received"},
