@@ -25,7 +25,7 @@ class RemoteNodeBasicAuthentication(authentication.BasicAuthentication):
                 password=password,
                 is_active=True
             )
-            print(f"[AUTH] Match found: {node.host}")
+            print(f"[AUTH] Match found: {node.base_url}")
             return (NodeUser(node), None)
         except RemoteNode.DoesNotExist:
             print(f"[AUTH] No matching RemoteNode found")
@@ -33,7 +33,7 @@ class RemoteNodeBasicAuthentication(authentication.BasicAuthentication):
             # Log all active nodes for debugging
             print(f"[AUTH] Active RemoteNodes in database:")
             for n in RemoteNode.objects.filter(is_active=True):
-                print(f"[AUTH]   - {n.host}: {n.username}:{n.password}")
+                print(f"[AUTH]   - {n.base_url}: {n.username}:{n.password}")
             
             raise exceptions.AuthenticationFailed('Invalid node credentials')
 
@@ -45,7 +45,7 @@ class NodeUser:
 
     def __init__(self, node=None):
         self.node = node
-        self.username = node.host if node else "remote_node"
+        self.username = node.base_url if node else "remote_node"
         self.is_authenticated = True
         self.is_active = True
         self.pk = node.pk if node else "node"
