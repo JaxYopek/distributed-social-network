@@ -4,7 +4,8 @@ from .api_views import (
     AuthorFQIDView, 
     AuthorListView, 
     followers_list_api,
-    followers_detail_api
+    followers_detail_api,
+    ExploreAuthorsView,
 )
 from . import api_views
 
@@ -13,6 +14,9 @@ app_name = "authors_api"
 urlpatterns = [
     # Authors list
     path('authors/', AuthorListView.as_view(), name='authors-list'),
+
+    # Explore (local only)
+    path('authors/explore/', api_views.ExploreAuthorsView.as_view(), name='explore-authors'),
     
     path(
         'authors/<path:author_fqid>/', 
@@ -23,8 +27,6 @@ urlpatterns = [
     # Single author by UUID
     path('authors/<uuid:pk>/', AuthorDetailView.as_view(), name='author-detail'),
     
-    # Explore (local only)
-    path('authors/explore/', api_views.ExploreAuthorsView.as_view(), name='explore-authors'),
     
     # Follow/unfollow
     path('authors/follow/', api_views.api_follow_author, name='api-follow'),
