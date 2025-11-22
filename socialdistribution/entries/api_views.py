@@ -541,6 +541,8 @@ def send_entry_to_remote_followers(entry: Entry, request):
         }
 
         try:
+            print(f"[send_entry_to_remote_followers] contentType being sent: {entry.content_type}")
+
             print(f"[send_entry_to_remote_followers] POST -> {inbox_url}")
             resp = requests.post(inbox_url, json=payload, auth=auth, timeout=10)
             print(f"[send_entry_to_remote_followers] <- {resp.status_code} {resp.text[:200]}")
