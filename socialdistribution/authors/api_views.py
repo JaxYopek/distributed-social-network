@@ -190,7 +190,8 @@ def api_follow_author(request):
                 followee=target_author,
                 defaults={'status': FollowRequestStatus.PENDING}
             )
-            
+            print(f"[FOLLOW] Using auth - username: {remote_node.username}, password: {remote_node.password}")
+            print(f"[FOLLOW] Remote node: {remote_node.name} at {remote_node.base_url}")
             return Response({
                 'detail': 'Follow request sent',
                 'created': created
