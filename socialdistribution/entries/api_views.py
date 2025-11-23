@@ -541,8 +541,6 @@ def send_entry_to_remote_followers(entry: Entry, request):
         }
 
         try:
-            print(f"[send_entry_to_remote_followers] contentType being sent: {entry.content_type}")
-
             print(f"[send_entry_to_remote_followers] POST -> {inbox_url}")
             resp = requests.post(inbox_url, json=payload, auth=auth, timeout=10)
             print(f"[send_entry_to_remote_followers] <- {resp.status_code} {resp.text[:200]}")
@@ -1303,12 +1301,10 @@ class InboxView(APIView):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        # Target entry
         parts = [p for p in entry_url.split("/") if p]
         entry_id = parts[-1]
 
         try:
-
             entry = Entry.objects.get(id=entry_id)
         except Entry.DoesNotExist:
             return Response(
@@ -1316,8 +1312,22 @@ class InboxView(APIView):
                 status=status.HTTP_404_NOT_FOUND,
             )
 
-        # Extract comment UUID
         comment_id = comment_full_id.split("/")[-1]
+
+        # --- DEDUP GUARD ---
+        existing = Comment.objects.filter(
+            entry=entry,
+            author=remote_author,
+            content=data.get("comment", ""),
+            content_type=data.get("contentType", "text/plain"),
+        ).first()
+
+        if existing:
+            return Response(
+                {"detail": "Duplicate comment ignored"},
+                status=status.HTTP_200_OK,
+            )
+        # --- END DEDUP GUARD ---
 
         import uuid as uuid_module
         try:
@@ -1342,6 +1352,7 @@ class InboxView(APIView):
             {"detail": "Comment received", "id": str(comment.id)},
             status=status.HTTP_201_CREATED if created else status.HTTP_200_OK,
         )
+
 
 
     def _handle_follow(self, recipient: Author, data: dict):
