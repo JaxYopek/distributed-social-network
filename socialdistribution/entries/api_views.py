@@ -1055,9 +1055,13 @@ def send_comment_like_to_author_inbox(comment: Comment, liker: Author, request):
         return
     
     # Build URLs
-    comment_url = request.build_absolute_uri(reverse("api:comment-detail", args=[comment.id]))
-    liker_url = request.build_absolute_uri(f"/api/authors/{liker.id}/")
-    author_url = f"{author_host}/api/authors/{comment_author.id}"
+    local_api_root = request.build_absolute_uri('/api/').rstrip('/')
+    remote_api_root = f"{author_host}/api"
+
+    entry = comment.entry
+    comment_url = f"{remote_api_root}/authors/{comment_author.id}/entries/{entry.id}/comments/{comment.id}/"
+    liker_url = f"{local_api_root}/authors/{liker.id}/"
+    author_url = f"{remote_api_root}/authors/{comment_author.id}"
     inbox_url = f"{author_url}/inbox/"
     
     like_object = {
@@ -1067,7 +1071,7 @@ def send_comment_like_to_author_inbox(comment: Comment, liker: Author, request):
             "type": "author",
             "id": liker_url,
             "displayName": getattr(liker, 'display_name', None) or liker.username,
-            "host": request.build_absolute_uri('/api/'),
+            "host": local_api_root + "/",
             "github": getattr(liker, 'github', ''),
             "profileImage": getattr(liker, 'profile_image', ''),
         },
