@@ -1002,9 +1002,6 @@ class EntryCommentsListCreateView(generics.ListCreateAPIView):
 
 
         
-        # Save the comment locally
-        comment = serializer.save(entry=entry, author=self.request.user)
-        
         send_comment_to_author_inbox(comment, self.request)
 
 class CommentDetailView(generics.RetrieveAPIView):
@@ -1065,7 +1062,7 @@ def send_comment_like_to_author_inbox(comment: Comment, liker: Author, request):
     inbox_url = f"{author_url}/inbox/"
     
     like_object = {
-        "type": "Like",
+        "type": "like",
         "summary": f"{getattr(liker, 'display_name', liker.username)} likes your comment",
         "author": {
             "type": "author",
@@ -1081,7 +1078,7 @@ def send_comment_like_to_author_inbox(comment: Comment, liker: Author, request):
     try:
         auth = HTTPBasicAuth(remote_node.username, remote_node.password)
         response = requests.post(inbox_url, json=like_object, auth=auth, timeout=10)
-        print(f"[COMMENT_LIKE] Sent to {inbox_url}: {response.status_code}")
+        print(f"[COMMENT_LIKE] Sent to {inbox_url}: {response.status_code} - {response.text[:200]}")    
     except requests.RequestException as e:
         print(f"[COMMENT_LIKE] Error: {e}")
 
