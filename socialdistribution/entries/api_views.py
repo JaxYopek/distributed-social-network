@@ -476,10 +476,8 @@ def send_entry_to_remote_followers(entry: Entry, request):
     )
 
     print(f"[send_entry_to_remote_followers] author={author.id} vis={entry.visibility} followers={followers_qs.count()}")
-
-    entry_api_url = request.build_absolute_uri(
-        reverse("api:entry-detail", args=[entry.id])
-    )
+    api_root = request.build_absolute_uri('/api/').rstrip('/')
+    entry_api_url = f"{api_root}/authors/{author.id}/entries/{entry.id}/"
     author_api_url = request.build_absolute_uri(f"/api/authors/{author.id}/")
 
     for fr in followers_qs:
