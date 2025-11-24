@@ -1055,8 +1055,7 @@ def send_comment_like_to_author_inbox(comment: Comment, liker: Author, request):
     local_api_root = request.build_absolute_uri('/api/').rstrip('/')
     remote_api_root = f"{author_host}/api"
 
-    entry = comment.entry
-    comment_url = f"{remote_api_root}/authors/{comment_author.id}/entries/{entry.id}/comments/{comment.id}/"
+    comment_url = f"{remote_api_root}/authors/{comment_author.id}/commented/{comment.id}/"
     liker_url = f"{local_api_root}/authors/{liker.id}/"
     author_url = f"{remote_api_root}/authors/{comment_author.id}"
     inbox_url = f"{author_url}/inbox/"
