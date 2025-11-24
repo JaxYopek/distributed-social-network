@@ -408,11 +408,21 @@ def send_like_to_author_inbox(entry: Entry, liker: Author, request):
         print(f"[LIKE] No remote node configured for host {author_host}")
         return
     
-    # Build URLs
-    entry_url = request.build_absolute_uri(reverse("api:entry-detail", args=[entry.id]))
-    liker_url = request.build_absolute_uri(f"/api/authors/{liker.id}/")
+    # Local API root (your node)
+    local_api_root = request.build_absolute_uri('/api/').rstrip('/')
+
+    # Remote API root (entry's author host)
+    remote_api_root = f"{author_host}/api"
+
+    # Object of the like = entry URL on the REMOTE node
+    entry_url = f"{remote_api_root}/authors/{author.id}/entries/{entry.id}/"
+
+    # Liker (you) stays on your domain
+    liker_url = f"{local_api_root}/authors/{liker.id}/"
+
     author_url = f"{author_host}/api/authors/{author.id}"
     inbox_url = f"{author_url}/inbox/"
+
     
     # Build like object according to spec
     like_object = {
