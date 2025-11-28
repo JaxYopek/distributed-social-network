@@ -35,12 +35,14 @@
 
 .user-info>h2 {
     font-family: 'SuperAdorable', sans-serif;
-    font-size: 40px; 
+    font-size: 36px; 
     color: #1E90FF; 
     font-weight: bold;
     text-transform: uppercase; 
     margin: 0; /* Remove default margins */
     padding: 1% 0;
+    letter-spacing: 1px;
+    text-shadow: 0 1px 2px rgba(0, 0, 0, 0.1);
 }
 
 .nav-links {
@@ -134,10 +136,11 @@
     overflow: hidden;
     word-wrap: break-word;
     position: relative;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen', 'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue', sans-serif;
 }
 
 .card:hover {
-    transform: scale(1.05); /* Zoom in by 5% */
+    transform: scale(1.009); /* Zoom in by 5% */
     box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2); /* Add a stronger shadow on hover */
 }
 
@@ -234,7 +237,9 @@
 /* Entry Content */
 .entry-title {
     margin-bottom: 10px;
-    font-size: 20px;
+    font-size: 22px;
+    font-weight: 600;
+    line-height: 1.3;
 }
 
 .entry-link {
@@ -248,9 +253,10 @@
 }
 
 .entry-description {
-    color: #666;
+    color: #4a4a4a;
     margin-bottom: 15px;
-    font-size: 14px;
+    font-size: 15px;
+    line-height: 1.6;
 }
 
 /* Entry Actions */
@@ -324,20 +330,15 @@
     -webkit-box-orient: vertical;
     overflow: hidden;
     text-overflow: ellipsis;
-    font-size: 14px;
-    line-height: 1.5;
+    font-size: 15px;
+    line-height: 1.6;
     margin-bottom: 10px;
+    color: #333;
 }
 
 /* Style for the expand button */
 .expand-btn {
-    background: none;
-    border: none;
-    color: #1E90FF;
-    font-weight: bold;
-    cursor: pointer;
-    padding: 0;
-    font-size: 14px;
+    display: none;
 }
 
 /* Line clamp for 1 line */

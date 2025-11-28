@@ -71,10 +71,6 @@
                     <p class="entry-description content-preview line-clamp-1" id="description-{{ entry.id }}">
                         {{ entry.description }}
                     </p>
-                    <button class="expand-btn" id="description-{{ entry.id }}-button" onclick="toggleContent('description-{{ entry.id }}', 1)">
-                        <strong>...</strong>
-                    </button>
-                    
                 {% endif %}
                 
                 {% if "image" in entry.content_type %}
@@ -86,10 +82,6 @@
                     <div class="markdown-content content-preview line-clamp-10" id="content-{{ entry.id }}">
                         {{ entry.content|render_markdown|safe }}
                     </div>
-                    <button class="expand-btn" id="content-{{ entry.id }}-button" onclick="toggleContent('content-{{ entry.id }}', 10)">
-                        <strong>...</strong>
-                    </button>
-                    
                 {% endif %}
             </div>
             <!-- Entry actions -->
