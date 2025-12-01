@@ -1138,7 +1138,9 @@ class InboxView(APIView):
     Receives posts/entries, likes, comments, and follow requests from remote nodes.
     """
     authentication_classes = [RemoteNodeBasicAuthentication]
-
+    # RemoteNodeBasicAuthentication will 401 bad/unknown/inactive nodes.
+    permission_classes = [permissions.AllowAny]
+    
     @extend_schema(
         request=InboxItemSerializer,
         responses={
@@ -1148,8 +1150,6 @@ class InboxView(APIView):
             404: {"type": "object", "properties": {"detail": {"type": "string"}}},
         },
     )
-    # RemoteNodeBasicAuthentication will 401 bad/unknown/inactive nodes.
-    permission_classes = [permissions.AllowAny]
 
     def post(self, request, author_id):
         # Recipient is the local author who owns this inbox
