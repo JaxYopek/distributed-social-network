@@ -261,12 +261,11 @@ class EntryDetailView(generics.RetrieveUpdateDestroyAPIView):
     serializer_class = EntrySerializer
     permission_classes = [permissions.AllowAny]
 
-    def get_object(self):
+    def get_object(self, entry_id):
         """
         Retrieves the entry object from the database and returns it unless incorrect visibility.
         Uses the `entry_id` path parameter.
         """
-        entry_id = self.kwargs.get("entry_id")
         entry = get_object_or_404(Entry, id=entry_id)
 
         if entry.visibility == "DELETED":

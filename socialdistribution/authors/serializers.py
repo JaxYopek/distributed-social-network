@@ -14,12 +14,12 @@ class AuthorSerializer(serializers.ModelSerializer):
     type = serializers.CharField(default="author", read_only=True)
     id = serializers.SerializerMethodField(read_only=True)
     host = serializers.SerializerMethodField(read_only=True)
-    web = serializers.SerializerMethodField(read_only=True)
 
     # Mapped fields
     displayName = serializers.CharField(source="display_name")
     github = serializers.CharField(allow_blank=True)
     profileImage = serializers.CharField(source="profile_image", allow_blank=True)
+    web = serializers.SerializerMethodField()
 
     class Meta:
         """
