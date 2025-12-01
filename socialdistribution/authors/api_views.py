@@ -7,7 +7,8 @@ from django.urls import reverse
 import requests
 from requests.auth import HTTPBasicAuth
 from authors.models import Author, FollowRequest, FollowRequestStatus
-from authors.serializers import AuthorSerializer
+from authors.serializers import AuthorSerializer, FollowAuthorRequestSerializer
+from drf_spectacular.utils import extend_schema
 
 
 class AuthorDetailView(generics.RetrieveAPIView):
@@ -118,7 +119,17 @@ class ExploreAuthorsView(APIView):
             'all': local_serializer.data + remote_authors
         })
 
-
+@extend_schema(
+    request=FollowAuthorRequestSerializer,
+    responses={
+        201: {"type": "object", "properties": {"detail": {"type": "string"}, "created": {"type": "boolean"}}},
+        200: {"type": "object", "properties": {"detail": {"type": "string"}, "created": {"type": "boolean"}}},
+        400: {"type": "object", "properties": {"detail": {"type": "string"}}},
+        404: {"type": "object", "properties": {"detail": {"type": "string"}}},
+        502: {"type": "object", "properties": {"detail": {"type": "string"}}},
+        503: {"type": "object", "properties": {"detail": {"type": "string"}}},
+    },
+)
 @api_view(['POST'])
 @drf_permission_classes([IsLocalUserOnly])  # Only local users can follow
 def api_follow_author(request):
