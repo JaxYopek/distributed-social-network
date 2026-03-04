@@ -1,4 +1,4 @@
-# SocialDistribution - DodgerBlue
+# SocialDistribution
 
 A federated social network platform built with Django and Django REST Framework. SocialDistribution allows authors to share posts, follow other authors, and interact across multiple nodes in a distributed network.
 
