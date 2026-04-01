@@ -4,7 +4,7 @@ A federated social network platform built with Django and Django REST Framework.
 
 See [the project description](https://uofa-cmput404.github.io/general/project.html) for more details.
 
-See [a current live deployment](https://f25-dodgerblue-de6249a319f3.herokuapp.com) of the social distribution!
+See the demo [here](https://drive.google.com/file/d/1vsG2C6Toxc4MIwqFKbYlyg6d3xUpx1sV/view)
 
 ## Table of Contents
 
